@@ -1,0 +1,50 @@
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+
+export default function (pi: ExtensionAPI) {
+  const socketPath = process.env.MUXY_SOCKET_PATH;
+  const paneID = process.env.MUXY_PANE_ID;
+  if (!socketPath || !paneID) return;
+
+  pi.on("agent_end", async (event, _ctx) => {
+    let body = "Session completed";
+
+    try {
+      const messages = event.messages ?? [];
+      const lastAssistant = [...messages]
+        .reverse()
+        .find((m) => m.role === "assistant");
+      if (lastAssistant) {
+        const content = lastAssistant.content;
+        const text =
+          typeof content === "string"
+            ? content
+            : (Array.isArray(content)
+                ? content
+                    .filter((p: any) => p.type === "text")
+                    .map((p: any) => p.text ?? "")
+                    .join("")
+                : "");
+        if (text) {
+          body = text.replace(/[\n\r|]+/g, " ").slice(0, 200);
+        }
+      }
+    } catch {
+      // Silently fall back to default body
+    }
+
+    const payload = `pi|${paneID}|Pi|${body}`;
+
+    try {
+      const { createConnection } = await import("node:net");
+      const conn = createConnection({ path: socketPath });
+      conn.on("error", () => {});
+      conn.write(payload, () => conn.end());
+      await new Promise((resolve) => {
+        conn.on("close", resolve);
+        setTimeout(resolve, 3000);
+      });
+    } catch {
+      // Silently ignore connection failures
+    }
+  });
+}

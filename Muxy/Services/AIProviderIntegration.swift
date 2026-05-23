@@ -50,6 +50,7 @@ final class AIProviderRegistry {
     private let codexProvider = CodexProvider()
     private let cursorProvider = CursorProvider()
     private let droidProvider = DroidProvider()
+    private let piProvider = PiProvider()
 
     lazy var providers: [AIProviderIntegration] = [
         claudeCodeProvider,
@@ -57,6 +58,7 @@ final class AIProviderRegistry {
         codexProvider,
         cursorProvider,
         droidProvider,
+        piProvider,
     ]
 
     lazy var usageProviders: [any AIUsageProvider] = [
