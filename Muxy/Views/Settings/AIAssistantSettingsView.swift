@@ -5,6 +5,7 @@ struct AIAssistantSettingsView: View {
     @AppStorage(AIAssistantSettings.claudeModelKey) private var claudeModel = ""
     @AppStorage(AIAssistantSettings.codexModelKey) private var codexModel = ""
     @AppStorage(AIAssistantSettings.opencodeModelKey) private var opencodeModel = ""
+    @AppStorage(AIAssistantSettings.piModelKey) private var piModel = ""
     @AppStorage(AIAssistantSettings.customCommandKey) private var customCommand = ""
     @AppStorage(AIAssistantSettings.commitPromptKey) private var commitPrompt = ""
     @AppStorage(AIAssistantSettings.prPromptKey) private var prPrompt = ""
@@ -82,6 +83,7 @@ struct AIAssistantSettingsView: View {
         case .claude: $claudeModel
         case .codex: $codexModel
         case .opencode: $opencodeModel
+        case .pi: $piModel
         case .custom: .constant("")
         }
     }

@@ -12,7 +12,7 @@ export default function (pi: ExtensionAPI) {
       const messages = event.messages ?? [];
       const lastAssistant = [...messages]
         .reverse()
-        .find((m) => m.role === "assistant");
+        .find((m: any) => m.role === "assistant");
       if (lastAssistant) {
         const content = lastAssistant.content;
         const text =
@@ -37,14 +37,16 @@ export default function (pi: ExtensionAPI) {
     try {
       const { createConnection } = await import("node:net");
       const conn = createConnection({ path: socketPath });
-      conn.on("error", () => {});
+      conn.on("error", (err: any) => {
+        process.stderr.write(`[muxy-pi] socket error: ${err?.message ?? err}\n`);
+      });
       conn.write(payload, () => conn.end());
       await new Promise((resolve) => {
         conn.on("close", resolve);
         setTimeout(resolve, 3000);
       });
-    } catch {
-      // Silently ignore connection failures
+    } catch (err: any) {
+      process.stderr.write(`[muxy-pi] connection error: ${err?.message ?? err}\n`);
     }
   });
 }
