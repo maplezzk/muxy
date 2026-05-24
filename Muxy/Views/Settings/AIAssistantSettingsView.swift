@@ -75,6 +75,10 @@ struct AIAssistantSettingsView: View {
                     onReset: { prPrompt = "" }
                 )
             }
+
+            SettingsSection("AI Usage", showsDivider: false) {
+                AIUsageSettingsView()
+            }
         }
     }
 

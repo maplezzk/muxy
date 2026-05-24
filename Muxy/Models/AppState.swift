@@ -17,8 +17,9 @@ final class AppState {
 
     struct DiffViewerRequest {
         let vcs: VCSTabState
-        let filePath: String
+        let filePath: String?
         let isStaged: Bool
+        var source: DiffViewerTabState.Source = .workingTree
     }
 
     struct CreatedCommandTab: Equatable {
@@ -475,9 +476,9 @@ final class AppState {
     func openDiffViewer(vcs: VCSTabState, filePath: String, isStaged: Bool, projectID: UUID) {
         for area in allAreas(for: projectID) {
             if let tab = area.tabs.first(where: { tab in
-                guard let diff = tab.content.diffViewerState else { return false }
-                return diff.filePath == filePath && diff.isStaged == isStaged
+                tab.content.diffViewerState != nil
             }) {
+                tab.content.diffViewerState?.select(filePath: filePath, isStaged: isStaged)
                 dispatch(.selectTab(projectID: projectID, areaID: area.id, tabID: tab.id))
                 return
             }
@@ -486,6 +487,32 @@ final class AppState {
             projectID: projectID,
             areaID: nil,
             request: DiffViewerRequest(vcs: vcs, filePath: filePath, isStaged: isStaged)
+        ))
+    }
+
+    func openDiffViewer(vcs: VCSTabState, source: DiffViewerTabState.Source, projectID: UUID) {
+        dispatch(.createDiffViewerTab(
+            projectID: projectID,
+            areaID: nil,
+            request: DiffViewerRequest(vcs: vcs, filePath: nil, isStaged: false, source: source)
+        ))
+    }
+
+    func openDiffViewer(projectID: UUID) {
+        guard let worktreePath = activeWorktreePath(for: projectID) else { return }
+        let vcs = VCSStateStore.shared.state(for: worktreePath)
+        for area in allAreas(for: projectID) {
+            if let tab = area.tabs.first(where: { tab in
+                tab.content.diffViewerState != nil
+            }) {
+                dispatch(.selectTab(projectID: projectID, areaID: area.id, tabID: tab.id))
+                return
+            }
+        }
+        dispatch(.createDiffViewerTab(
+            projectID: projectID,
+            areaID: nil,
+            request: DiffViewerRequest(vcs: vcs, filePath: nil, isStaged: false)
         ))
     }
 
