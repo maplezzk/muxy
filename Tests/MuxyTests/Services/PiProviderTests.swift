@@ -47,49 +47,173 @@ struct PiProviderTests {
         let key = provider.settingsKey
         let defaults = UserDefaults.standard
 
-        // Clean up before test
         defaults.removeObject(forKey: key)
         #expect(defaults.bool(forKey: key, fallback: true) == true)
 
-        // Set to false
         provider.isEnabled = false
         #expect(provider.isEnabled == false)
 
-        // Set back to true
         provider.isEnabled = true
         #expect(provider.isEnabled == true)
 
-        // Clean up
         defaults.removeObject(forKey: key)
     }
 
-    @Test("install creates extension file")
-    func installCreatesFile() throws {
-        // Use a temp directory instead of ~/.pi/agent/extensions
-        let tempDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("PiProviderTests-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: tempDir) }
+    @Test("install creates extension file and registers settings")
+    func installCreatesFileAndRegistersSettings() throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanUp() }
 
-        // The install method uses Bundle.appResources which won't find the file
-        // in test context. This test verifies the method throws the expected error
-        // when the bundle resource is not found.
+        let provider = fixture.provider()
+
+        try provider.install(hookScriptPath: "")
+
+        let destinationURL = fixture.homeURL
+            .appendingPathComponent(".pi/agent/extensions/muxy-notify.ts")
+        let installedData = try Data(contentsOf: destinationURL)
+        let sourceData = try Data(contentsOf: fixture.sourceURL)
+        #expect(installedData == sourceData)
+
+        let settings = try fixture.readSettings()
+        let extensions = try #require(settings["extensions"] as? [String])
+        #expect(extensions == [destinationURL.path])
+        #expect(FileManager.default.fileExists(atPath: fixture.settingsURL.path + ".muxy-backup"))
+    }
+
+    @Test("install is idempotent when extension is already current")
+    func installIsIdempotent() throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanUp() }
+
+        let provider = fixture.provider()
+
+        try provider.install(hookScriptPath: "")
+        try provider.install(hookScriptPath: "")
+
+        let settings = try fixture.readSettings()
+        let extensions = try #require(settings["extensions"] as? [String])
+        #expect(extensions.count == 1)
+    }
+
+    @Test("uninstall removes extension file and unregisters settings")
+    func uninstallRemovesFileAndUnregistersSettings() throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanUp() }
+
+        let provider = fixture.provider()
+
+        try provider.install(hookScriptPath: "")
+        try provider.uninstall()
+
+        let destinationPath = fixture.homeURL
+            .appendingPathComponent(".pi/agent/extensions/muxy-notify.ts")
+            .path
+        #expect(!FileManager.default.fileExists(atPath: destinationPath))
+
+        let settings = try fixture.readSettings()
+        #expect(settings["extensions"] == nil)
+    }
+
+    @Test("uninstall does nothing when file does not exist")
+    func uninstallNoFile() throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanUp() }
+
+        try fixture.provider().uninstall()
+    }
+
+    @Test("isToolInstalled checks common paths")
+    func isToolInstalledFromCommonPath() throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanUp() }
+
+        let executableURL = fixture.homeURL.appendingPathComponent(".local/bin/pi")
+        try FileManager.default.createDirectory(
+            at: executableURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data().write(to: executableURL)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: FilePermissions.executable],
+            ofItemAtPath: executableURL.path
+        )
+
+        #expect(fixture.provider().isToolInstalled())
+    }
+
+    @Test("isToolInstalled checks PATH entries")
+    func isToolInstalledFromPath() throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanUp() }
+
+        let binURL = fixture.rootURL.appendingPathComponent("npm/bin")
+        let executableURL = binURL.appendingPathComponent("pi")
+        try FileManager.default.createDirectory(at: binURL, withIntermediateDirectories: true)
+        try Data().write(to: executableURL)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: FilePermissions.executable],
+            ofItemAtPath: executableURL.path
+        )
+
+        #expect(fixture.provider(pathEnvironment: binURL.path).isToolInstalled())
+    }
+
+    @Test("install throws when resource is missing")
+    func installThrowsWhenResourceMissing() throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanUp() }
+
+        let provider = PiProvider(
+            homeDirectory: fixture.homeURL.path,
+            pathEnvironment: "",
+            resourceURL: { _, _ in nil }
+        )
+
         #expect(throws: PiProviderError.bundleResourceNotFound) {
             try provider.install(hookScriptPath: "")
         }
     }
 
-    @Test("uninstall does nothing when file does not exist")
-    func uninstallNoFile() throws {
-        // Should not throw when there's nothing to remove
-        try provider.uninstall()
-    }
+    private struct Fixture {
+        let rootURL: URL
+        let homeURL: URL
+        let sourceURL: URL
+        let settingsURL: URL
 
-    @Test("isToolInstalled checks pi executable at common paths")
-    func isToolInstalled() {
-        // Verifies the method executes without throwing.
-        // Full path coverage requires pi to be installed at one of the
-        // expected paths (~/.local/bin, /usr/local/bin, /opt/homebrew/bin).
-        #expect(provider.isToolInstalled() == true || provider.isToolInstalled() == false)
+        init() throws {
+            rootURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("PiProviderTests-\(UUID().uuidString)", isDirectory: true)
+            homeURL = rootURL.appendingPathComponent("home", isDirectory: true)
+            sourceURL = rootURL.appendingPathComponent("muxy-pi-extension.ts")
+            settingsURL = homeURL.appendingPathComponent(".pi/agent/settings.json")
+
+            try FileManager.default.createDirectory(
+                at: settingsURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try Data("extension source".utf8).write(to: sourceURL)
+            let settingsData = try JSONSerialization.data(
+                withJSONObject: ["extensions": []],
+                options: [.prettyPrinted, .sortedKeys]
+            )
+            try settingsData.write(to: settingsURL)
+        }
+
+        func provider(pathEnvironment: String = "") -> PiProvider {
+            PiProvider(
+                homeDirectory: homeURL.path,
+                pathEnvironment: pathEnvironment,
+                resourceURL: { _, _ in sourceURL }
+            )
+        }
+
+        func readSettings() throws -> [String: Any] {
+            let data = try Data(contentsOf: settingsURL)
+            return try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        }
+
+        func cleanUp() {
+            try? FileManager.default.removeItem(at: rootURL)
+        }
     }
 }

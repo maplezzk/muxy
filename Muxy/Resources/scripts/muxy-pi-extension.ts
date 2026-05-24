@@ -28,9 +28,7 @@ export default function (pi: ExtensionAPI) {
           body = text.replace(/[\n\r|]+/g, " ").slice(0, 200);
         }
       }
-    } catch {
-      // Silently fall back to default body
-    }
+    } catch {}
 
     const payload = `pi|${paneID}|Pi|${body}`;
 
