@@ -280,6 +280,14 @@ enum SettingsCatalog {
             defaultValue: Double(EditorSettings.defaultMarkdownPreviewFontScale)
         ),
         SettingsCatalogItem(
+            key: "editor.markdownDefaultViewMode",
+            title: "Markdown Default View",
+            description: "Chooses the default view mode for Markdown files.",
+            category: .editor,
+            section: "Markdown Preview",
+            defaultValue: EditorSettings.defaultMarkdownViewMode.rawValue
+        ),
+        SettingsCatalogItem(
             key: "editor.htmlDefaultViewMode",
             title: "HTML Default View",
             description: "Chooses the default view mode for HTML files.",

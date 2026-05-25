@@ -256,6 +256,7 @@ enum SettingsJSONStore {
         case "editor.externalEditorCommand": settings.externalEditorCommand
         case "editor.markdownPreviewFontFamily": settings.markdownPreviewFontFamily
         case "editor.markdownPreviewFontScale": Double(settings.markdownPreviewFontScale)
+        case "editor.markdownDefaultViewMode": settings.markdownDefaultViewMode.rawValue
         case "editor.htmlDefaultViewMode": settings.htmlDefaultViewMode.rawValue
         case "editor.richInputImageStrategy": settings.richInputImageStrategy.rawValue
         case "editor.richInputFontFamily": settings.richInputFontFamily
@@ -374,6 +375,9 @@ enum SettingsJSONStore {
         case "editor.markdownPreviewFontScale":
             guard let value = doubleValue(value) else { return false }
             settings.markdownPreviewFontScale = CGFloat(value)
+        case "editor.markdownDefaultViewMode":
+            guard let rawValue = value as? String, let mode = EditorMarkdownViewMode(rawValue: rawValue) else { return false }
+            settings.markdownDefaultViewMode = mode
         case "editor.htmlDefaultViewMode":
             guard let rawValue = value as? String, let mode = EditorMarkdownViewMode(rawValue: rawValue) else { return false }
             settings.htmlDefaultViewMode = mode

@@ -183,7 +183,7 @@ final class EditorTabState: Identifiable {
         self.projectPath = projectPath
         self.filePath = filePath
         if isMarkdownFile {
-            markdownViewMode = .preview
+            markdownViewMode = EditorSettings.shared.markdownDefaultViewMode
         }
         if isHTMLFile {
             htmlViewMode = defaultHTMLViewMode

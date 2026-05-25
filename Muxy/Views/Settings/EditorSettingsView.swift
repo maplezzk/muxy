@@ -107,6 +107,16 @@ struct EditorSettingsView: View {
                     .buttonStyle(.borderless)
                 }
             }
+
+            SettingsRow("Default View") {
+                Picker("", selection: $settings.markdownDefaultViewMode) {
+                    ForEach(EditorMarkdownViewMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .labelsHidden()
+                .frame(width: SettingsMetrics.controlWidth, alignment: .trailing)
+            }
         }
 
         SettingsSection("HTML") {
