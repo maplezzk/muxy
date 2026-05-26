@@ -56,7 +56,7 @@ enum AIAssistantProvider: String, CaseIterable, Identifiable, Codable {
             }
             return args
         case .pi:
-            var args = ["-p"]
+            var args = ["--no-session", "-p"]
             if let model, !model.isEmpty {
                 args.append(contentsOf: ["--model", model])
             }
