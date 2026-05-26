@@ -3,7 +3,7 @@ import Foundation
 @MainActor
 enum SplitReducer {
     static func splitArea(_ request: AppState.SplitAreaRequest, state: inout WorkspaceState) {
-        guard let key = WorkspaceReducerShared.activeKey(projectID: request.projectID, state: state),
+        guard let key = WorkspaceReducerShared.keyForArea(projectID: request.projectID, areaID: request.areaID, state: state),
               let root = state.workspaceRoots[key]
         else { return }
         let (newRoot, newAreaID) = root.splitting(
