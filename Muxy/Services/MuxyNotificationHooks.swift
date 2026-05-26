@@ -32,9 +32,7 @@ enum MuxyNotificationHooks {
         return nil
     }
 
-    private static func findBundledScript(_ name: String, extension ext: String) -> String? {
-        let bundle = Bundle.appResources
-
+    static func findBundledScript(_ name: String, extension ext: String, bundle: Bundle = Bundle.appResources) -> String?
         let find: (String?) -> URL? = { sub in
             bundle.url(forResource: name, withExtension: ext, subdirectory: sub)
         }

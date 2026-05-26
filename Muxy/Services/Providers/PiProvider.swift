@@ -155,7 +155,7 @@ struct PiProvider: AIProviderIntegration, AIUsageProvider {
     }
 }
 
-enum PiProviderError: LocalizedError {
+enum PiProviderError: LocalizedError, Equatable {
     case bundleResourceNotFound
     case invalidSettingsFile(String)
 
