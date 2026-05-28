@@ -413,7 +413,7 @@ final class ExtensionStore {
         tokens[ext.id] = token
 
         var environment = ProcessInfo.processInfo.environment
-        environment["MUXY_SOCKET_PATH"] = NotificationSocketServer.socketPath
+        environment["MUXY_SOCKET_PATH"] = NotificationSocketServer.shared.socketPath
         environment["MUXY_EXTENSION_ID"] = ext.id
         environment["MUXY_EXTENSION_TOKEN"] = token
         let logURL = ExtensionLogStore.shared.logURL(extensionID: ext.id, directory: ext.directory)

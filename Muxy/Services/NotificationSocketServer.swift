@@ -27,6 +27,8 @@ final class NotificationSocketServer: @unchecked Sendable {
         var inputBuffer = Data()
         var writeSource: DispatchSourceWrite?
         var droppedNotificationCount = 0
+        var pendingCommandCount = 0
+        var pendingDispose = false
 
         init(fd: Int32) {
             self.fd = fd
@@ -48,13 +50,11 @@ final class NotificationSocketServer: @unchecked Sendable {
         let extensionID: String?
     }
 
-    static var socketPath: String {
-        MuxyFileStorage.appSupportDirectory()
-            .appendingPathComponent("muxy.sock")
-            .path
-    }
+    var socketPath: String = MuxyFileStorage.appSupportDirectory()
+        .appendingPathComponent("muxy.sock")
+        .path
 
-    private init() {}
+    init() {}
 
     func start() {
         queue.async { [weak self] in
@@ -123,7 +123,7 @@ final class NotificationSocketServer: @unchecked Sendable {
     }
 
     private func startListening() {
-        let path = Self.socketPath
+        let path = socketPath
         unlink(path)
 
         serverFD = socket(AF_UNIX, SOCK_STREAM, 0)
@@ -239,7 +239,15 @@ final class NotificationSocketServer: @unchecked Sendable {
         processBufferedLines(session: session)
 
         if reachedEOF {
+<<<<<<< Updated upstream
             disposeSession(session)
+=======
+            if session.pendingCommandCount > 0 {
+                session.pendingDispose = true
+            } else {
+                disposeSession(session)
+            }
+>>>>>>> Stashed changes
         }
     }
 
@@ -312,11 +320,17 @@ final class NotificationSocketServer: @unchecked Sendable {
             return
         }
         let context = ClientContext(extensionID: session.extensionID)
-        Task { @Sendable [weak self] in
+        session.pendingCommandCount += 1
+        Task { @Sendable [weak self, weak session] in
             let response = await handler(message, context)
-            guard let self else { return }
+            guard let self, let session else { return }
             self.queue.async { [weak self] in
-                self?.enqueueWrite(session: session, text: response + "\n")
+                guard let self else { return }
+                self.enqueueWrite(session: session, text: response + "\n")
+                session.pendingCommandCount -= 1
+                if session.pendingCommandCount == 0, session.pendingDispose {
+                    self.disposeSession(session)
+                }
             }
         }
     }
