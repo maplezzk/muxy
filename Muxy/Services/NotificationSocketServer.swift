@@ -212,6 +212,7 @@ final class NotificationSocketServer: @unchecked Sendable {
 
     private func readFromSession(_ session: ClientSession) {
         var buffer = [UInt8](repeating: 0, count: 4096)
+        var reachedEOF = false
         while true {
             let bytesRead = read(session.fd, &buffer, buffer.count)
             if bytesRead > 0 {
@@ -221,11 +222,12 @@ final class NotificationSocketServer: @unchecked Sendable {
                     disposeSession(session)
                     return
                 }
+                processBufferedLines(session: session)
                 continue
             }
             if bytesRead == 0 {
-                disposeSession(session)
-                return
+                reachedEOF = true
+                break
             }
             if errno == EAGAIN || errno == EWOULDBLOCK {
                 break
@@ -234,6 +236,14 @@ final class NotificationSocketServer: @unchecked Sendable {
             return
         }
 
+        processBufferedLines(session: session)
+
+        if reachedEOF {
+            disposeSession(session)
+        }
+    }
+
+    private func processBufferedLines(session: ClientSession) {
         while let newlineRange = session.inputBuffer.range(of: Data([UInt8(ascii: "\n")])) {
             let lineData = session.inputBuffer.subdata(in: 0 ..< newlineRange.lowerBound)
             session.inputBuffer.removeSubrange(0 ..< newlineRange.upperBound)
