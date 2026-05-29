@@ -1,9 +1,0 @@
-{
-  "run_id": "20260529-233213-23dd9833",
-  "branch": "fix/ai-provider-hook-resource-lookup",
-  "head_sha": "25e3767062ad38739fde3a50a09ac69dd42d696d",
-  "verdict": "Ready with fixes",
-  "completed_at": "2026-05-29T15:43:24Z",
-  "fixes_applied": 3,
-  "tests_added": 3
-}
