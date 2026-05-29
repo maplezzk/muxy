@@ -1,0 +1,88 @@
+{
+  "reviewer": "adversarial",
+  "findings": [
+    {
+      "title": "Cascade: Backup of non-existent settings.json crashes registerExtensionInSettings, causing permanent extension registration failure",
+      "severity": "P0",
+      "file": "Muxy/Services/Providers/PiProvider.swift",
+      "line": 98,
+      "confidence": 100,
+      "autofix_class": "manual",
+      "owner": "human",
+      "requires_verification": true,
+      "pre_existing": false,
+      "suggested_fix": "在 copyItem 调用前增加 fileExists 守卫，仅当 settingsPath 存在时才创建备份。或者将 backup 逻辑移到 if fileExists 分支内。",
+      "evidence": [
+        "触发条件：Pi 首次安装时，~/.pi/agent/settings.json 不存在。",
+        "步骤1：registerExtensionInSettings() 进入 else 分支，设置 json = [:]。",
+        "步骤2：构造 extensions 数组并序列化 updatedData。",
+        "步骤3：try? FileManager.default.removeItem(atPath: backupPath) — 安全，不抛异常。",
+        "步骤4：try FileManager.default.copyItem(atPath: settingsPath, toPath: backupPath) — settingsPath 不存在，FileManager.copyItem 抛出 NSCocoaErrorDomain code=4（文件不存在）。",
+        "步骤5：异常向上传播，registerExtensionInSettings 失败，install() 也失败。但此时目标文件 muxy-notify.ts 已写入磁盘。",
+        "级联步骤：下次 installAll 运行时，PiProvider.install() 检测到目标文件存在且内容匹配，直接 return，跳过 registerExtensionInSettings()。",
+        "最终状态：扩展文件存在但从未注册到 settings.json，Pi 永远不会加载该扩展 — 静默永久失败。"
+      ]
+    },
+    {
+      "title": "forceInstall 非原子操作：uninstall 成功后 install 失败导致提供者处于无 hook 状态",
+      "severity": "P1",
+      "file": "Muxy/Services/AIProviderIntegration.swift",
+      "line": 121,
+      "confidence": 100,
+      "autofix_class": "advisory",
+      "owner": "human",
+      "requires_verification": false,
+      "pre_existing": true,
+      "suggested_fix": "考虑在 install 失败时回滚（重新 install 旧 hook），或在失败后记录状态以便下次重试。",
+      "evidence": [
+        "触发条件：用户对某 provider 调用 forceInstall。",
+        "步骤1：try provider.uninstall() 成功 — hook 已移除。",
+        "步骤2：try provider.install(hookScriptPath:) 失败（例如 bundle resource 被删除、settings.json 写入权限不足）。",
+        "步骤3：catch 块仅记录日志，不执行任何恢复操作。",
+        "最终状态：provider 既没有旧 hook 也没有新 hook，直到下一次 installAll 或手动 forceInstall。"
+      ]
+    },
+    {
+      "title": "unregisterExtensionFromSettings 在 JSON 解析失败时不清理扩展文件，造成孤立的扩展引用",
+      "severity": "P2",
+      "file": "Muxy/Services/Providers/PiProvider.swift",
+      "line": 124,
+      "confidence": 75,
+      "autofix_class": "advisory",
+      "owner": "human",
+      "requires_verification": false,
+      "pre_existing": false,
+      "suggested_fix": "unregister 失败时应保留扩展文件，以便 settings 修复后仍能工作；或确保部分失败时状态一致。",
+      "evidence": [
+        "场景：settings.json 存在但内容损坏（非 JSON 或非字典类型）。",
+        "步骤1：uninstall() 调用 FileManager.default.removeItem(atPath: destinationPath) 成功删除扩展文件。",
+        "步骤2：unregisterExtensionFromSettings() 被调用，解析 settings.json 失败。",
+        "步骤3：新代码记录 warning 日志并 return，不抛异常。",
+        "结果：扩展文件已删除，但 settings.json 中仍保留对目标路径的引用 — Pi 启动时会尝试加载不存在的扩展文件。",
+        "注：旧代码也静默 return，只是不记录日志。但新代码添加日志表明开发者已意识到此路径存在，却未处理数据不一致。"
+      ]
+    }
+  ],
+  "residual_risks": [
+    "findBundledScript 设置可执行权限会修改 App Bundle 内的文件。对于已签名的 bundle，这可能在某些 macOS 安全策略下导致问题。此行为已存在于旧代码中，非本次 diff 引入。",
+    "installAll 循环中 isToolInstalled() 使用 FileManager.default.isExecutableFile(atPath:) 返回 Bool 不会崩溃，但若文件系统在检查过程中发生状态变化（如网络挂载断开），可能出现 TOCTOU 不一致。此风险较低且为既有行为。",
+    "多个 provider 并发调用 installAll 与 forceInstall 可能导致 settings.json 的竞态写入。由于 @MainActor 保护，此风险在实际使用中较低。"
+  ],
+  "testing_gaps": [
+    {
+      "description": "PiProvider.registerExtensionInSettings 从空白创建 settings.json 的路径零测试覆盖",
+      "severity": "P0",
+      "suggestion": "添加测试：settings.json 不存在时调用 registerExtensionInSettings，验证文件被正确创建且包含扩展路径"
+    },
+    {
+      "description": "PiProvider.resourceURL 回退到 scripts/ 子目录的行为无测试覆盖",
+      "severity": "P2",
+      "suggestion": "添加测试：bundle root 无资源时验证 resourceURL 回退到 scripts/ 子目录"
+    },
+    {
+      "description": "install 检测到目标文件已存在且内容匹配时跳过 registerExtensionInSettings 的路径无测试覆盖",
+      "severity": "P1",
+      "suggestion": "添加测试：模拟上次 install 在 registerExtensionInSettings 处失败、目标文件已存在，验证本次 install 仍然完成注册"
+    }
+  ]
+}

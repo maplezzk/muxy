@@ -92,7 +92,7 @@ struct PiProvider: AIProviderIntegration, AIUsageProvider {
         var json: [String: Any]
         if FileManager.default.fileExists(atPath: settingsPath) {
             let data = try Data(contentsOf: url)
-            guard let parsed = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            guard let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
                 throw PiProviderError.invalidSettingsFile(settingsPath)
             }
             json = parsed
@@ -110,7 +110,9 @@ struct PiProvider: AIProviderIntegration, AIUsageProvider {
 
             let backupPath = settingsPath + ".muxy-backup"
             try? FileManager.default.removeItem(atPath: backupPath)
-            try FileManager.default.copyItem(atPath: settingsPath, toPath: backupPath)
+            if FileManager.default.fileExists(atPath: settingsPath) {
+                try FileManager.default.copyItem(atPath: settingsPath, toPath: backupPath)
+            }
 
             try updatedData.write(to: url, options: .atomic)
             try FileManager.default.setAttributes(

@@ -1,0 +1,64 @@
+{
+  "reviewer": "reliability",
+  "findings": [
+    {
+      "title": "registerExtensionInSettings 在 settings.json 不存在时崩溃",
+      "severity": "P1",
+      "file": "Muxy/Services/Providers/PiProvider.swift",
+      "line": 98,
+      "confidence": 100,
+      "autofix_class": "safe_auto",
+      "owner": "review-fixer",
+      "requires_verification": true,
+      "pre_existing": false,
+      "evidence": [
+        "diff 移除了函数顶部的 `guard FileManager.default.fileExists(atPath: settingsPath) else { return }` 提前返回守卫，改为在 else 分支中设置 `json = [:]`",
+        "当 settings.json 不存在时，json 被初始化为 `[:]`，extensionPath 不在 extensions 中，代码进入 if 块",
+        "第 120 行 `try FileManager.default.copyItem(atPath: settingsPath, toPath: backupPath)` 会因为 settingsPath 不存在而抛出错误（Foundation 错误码 4: fileDoesNotExist）",
+        "这导致 `install()` 抛出异常，被 `installAll()` 捕获后仅记录日志，但 hook 脚本文件已写入，settings.json 中却未注册扩展——整体安装处于不一致状态"
+      ],
+      "suggested_fix": "在 backup copyItem 调用前增加文件存在性检查：`if FileManager.default.fileExists(atPath: settingsPath) { try FileManager.default.copyItem(...) }`。或使用 try? 包裹 copyItem（备份是 best-effort 的）。"
+    },
+    {
+      "title": "forceInstall() 缺少部分失败回滚",
+      "severity": "P2",
+      "file": "Muxy/Services/AIProviderIntegration.swift",
+      "line": 120,
+      "confidence": 75,
+      "autofix_class": "manual",
+      "owner": "human",
+      "requires_verification": false,
+      "pre_existing": false,
+      "evidence": [
+        "`forceInstall()` 在同一个 do/catch 中依次调用 `try provider.uninstall()` 和 `try provider.install(...)`",
+        "如果 uninstall() 成功但 install() 失败，catch 块记录日志后函数返回，provider 处于已卸载但未重新安装的状态",
+        "此时 provider 的 hook 被移除，不会再响应通知事件，直到下次 installAll() 循环重新安装",
+        "没有状态标记或重试机制来检测和自动恢复这种部分失败状态"
+      ],
+      "suggested_fix": "考虑将 uninstall/install 分离到独立的 do/catch 块，或在 install 失败后尝试重新安装（带重试），或在 install 失败时记录当前状态供下次 installAll 优先处理。"
+    }
+  ],
+  "residual_risks": [
+    {
+      "risk": "TOCTOU：registerExtensionInSettings 和 unregisterExtensionInSettings 中使用 FileManager.default.fileExists 检查后再执行文件操作，存在检查与使用之间的竞态条件。对于本地应用配置文件场景风险极低。",
+      "severity": "P3",
+      "pre_existing": true
+    },
+    {
+      "risk": "findBundledScript 中：如果 Bundle.url(forResource:) 的 root 查找返回了 URL 但 fileExists 检查失败，不会回退到 scripts/ 子目录查找。这是防御性检查的一个边界情况，Bundle API 理论上不应返回不存在的 URL。",
+      "severity": "P3",
+      "pre_existing": false
+    },
+    {
+      "risk": "unregisterExtensionFromSettings 在 JSON 解析失败时仅记录 warning 后 return，静默跳过清理。可能导致 settings.json 中残留已卸载的扩展引用。",
+      "severity": "P3",
+      "pre_existing": false
+    }
+  ],
+  "testing_gaps": [
+    "registerExtensionInSettings 在 settings.json 不存在时的行为——当前会因 copyItem 崩溃，缺少测试覆盖此路径",
+    "forceInstall() 部分失败场景——uninstall 成功但 install 失败后的状态一致性缺少测试",
+    "unregisterExtensionFromSettings 在 settings.json 缺失或 JSON 解析失败时的优雅降级缺少测试",
+    "installAll() 中多个 provider 部分失败时的整体状态——当前每个 provider 独立 try/catch，但缺少端到端测试验证部分失败后系统的最终状态"
+  ]
+}

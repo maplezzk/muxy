@@ -1,0 +1,64 @@
+{
+  "reviewer": "maintainability",
+  "findings": [
+    {
+      "title": "重复的 bundle 脚本查找逻辑（scripts/ 子目录回退）",
+      "severity": "P1",
+      "file": "Muxy/Services/Providers/PiProvider.swift",
+      "line": 29,
+      "confidence": 75,
+      "evidence": [
+        "MuxyNotificationHooks.findBundledScript 中使用 find(nil) ?? find(\"scripts\") 实现回退查找",
+        "PiProvider 的 resourceURL 默认闭包中使用 bundle.url(forResource:..., subdirectory: nil) ?? bundle.url(forResource:..., subdirectory: \"scripts\") 实现了完全相同的回退逻辑",
+        "两者独立维护，若将来需要增加第三个回退路径（如 Resources/），两处都需要同步修改",
+        "PiProvider.install(hookScriptPath:) 未使用传入的 hookScriptPath 参数，而是通过 resourceURL 闭包再次查找同一文件，存在三层冗余查找"
+      ],
+      "suggested_fix": "将 PiProvider 的 resourceURL 实现委托给 MuxyNotificationHooks.findBundledScript，或统一通过一个集中的 Bundle 资源查找工具来消除重复。如果 PiProvider.install() 实际不需要 hookScriptPath 参数，建议从协议中移除该参数或让 PiProvider 使用它。",
+      "autofix_class": "manual",
+      "owner": "review-fixer",
+      "requires_verification": true,
+      "pre_existing": false
+    },
+    {
+      "title": "注册扩展时，备份不存在的 settings 文件会导致异常",
+      "severity": "P1",
+      "file": "Muxy/Services/Providers/PiProvider.swift",
+      "line": 94,
+      "confidence": 100,
+      "evidence": [
+        "registerExtensionInSettings() 现在在 settingsPath 不存在时创建 json = [:] 而不是直接返回",
+        "当 settingsPath 不存在且进入 extensions 追加逻辑后，try FileManager.default.copyItem(atPath: settingsPath, toPath: backupPath) 会因源文件不存在而抛出异常",
+        "旧代码在文件不存在时提前 return，不会触发备份逻辑；新代码移除了这个保护但未调整后续的备份逻辑"
+      ],
+      "suggested_fix": "在备份前增加文件存在性检查：if FileManager.default.fileExists(atPath: settingsPath) { try? FileManager.default.copyItem(atPath: settingsPath, toPath: backupPath) }，或对不存在的 settings 文件跳过备份步骤。",
+      "autofix_class": "safe_auto",
+      "owner": "review-fixer",
+      "requires_verification": true,
+      "pre_existing": false
+    },
+    {
+      "title": "PiProvider.install() 的 hookScriptPath 参数未被使用",
+      "severity": "P2",
+      "file": "Muxy/Services/Providers/PiProvider.swift",
+      "line": 68,
+      "confidence": 100,
+      "evidence": [
+        "PiProvider.install(hookScriptPath:) 签名接受 hookScriptPath 参数，但方法体内未读取该参数",
+        "方法使用 resourceURL 闭包重新查找资源文件，完全忽略传入的路径",
+        "调用方（AIProviderRegistry.installAll）通过 MuxyNotificationHooks.scriptPath() 查找路径并传入，但 PiProvider 重复了查找工作"
+      ],
+      "suggested_fix": "要么让 PiProvider.install() 使用传入的 hookScriptPath 参数替代 resourceURL 查找，要么将协议方法改为不带路径参数（需要评估其他 provider 是否依赖该参数）。",
+      "autofix_class": "manual",
+      "owner": "review-fixer",
+      "requires_verification": true,
+      "pre_existing": true
+    }
+  ],
+  "residual_risks": [
+    "MuxyNotificationHooks.findBundledScript 的访问级别从 private 改为 internal（为了测试），暴露了实现细节。如果未来有更多代码直接调用此方法而非通过 scriptPath()，可能导致行为不一致"
+  ],
+  "testing_gaps": [
+    "未测试 PiProvider.registerExtensionInSettings() 在 settings.json 不存在时能否正确创建文件（会因备份逻辑而崩溃）",
+    "未测试 PiProvider.resourceURL 回退到 scripts/ 子目录的场景"
+  ]
+}
