@@ -109,8 +109,20 @@ final class GhosttyTerminalNSView: NSView {
             pendingSurfaceCreation = true
             return
         }
-        pendingSurfaceCreation = false
+        createSurface(with: backingSize, app: app)
+    }
 
+    func createSurfaceEagerly() {
+        guard surface == nil, let app = GhosttyService.shared.app else { return }
+        if bounds.width <= 0 || bounds.height <= 0 {
+            frame = NSRect(x: 0, y: 0, width: 800, height: 600)
+        }
+        let backingSize = backingPixelSize() ?? (width: 800, height: 600)
+        pendingSurfaceCreation = false
+        createSurface(with: backingSize, app: app)
+    }
+
+    private func createSurface(with backingSize: (width: UInt32, height: UInt32), app: ghostty_app_t) {
         var config = ghostty_surface_config_new()
         config.platform_tag = GHOSTTY_PLATFORM_MACOS
         config.platform = ghostty_platform_u(

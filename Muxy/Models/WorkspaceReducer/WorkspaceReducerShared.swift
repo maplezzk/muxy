@@ -7,6 +7,12 @@ enum WorkspaceReducerShared {
         return WorktreeKey(projectID: projectID, worktreeID: worktreeID)
     }
 
+    static func keyForArea(projectID: UUID, areaID: UUID, state: WorkspaceState) -> WorktreeKey? {
+        state.workspaceRoots.first(where: { key, root in
+            key.projectID == projectID && root.containsArea(id: areaID)
+        })?.key
+    }
+
     static func resolveArea(key: WorktreeKey, areaID: UUID?, state: WorkspaceState) -> TabArea? {
         guard let root = state.workspaceRoots[key] else { return nil }
         if let areaID {

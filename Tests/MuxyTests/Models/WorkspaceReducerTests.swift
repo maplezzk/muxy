@@ -1039,4 +1039,184 @@ struct WorkspaceReducerTests {
         let newSecondArea = area(in: state, key: key, areaID: secondAreaID)!
         #expect(newSecondArea.activeTabID == newSecondArea.tabs[1].id)
     }
+
+    @Test("splitArea finds area in non-active worktree")
+    func splitAreaInNonActiveWorktree() {
+        let projectID = UUID()
+        let worktreeAID = UUID()
+        let worktreeBID = UUID()
+        let keyA = WorktreeKey(projectID: projectID, worktreeID: worktreeAID)
+        let keyB = WorktreeKey(projectID: projectID, worktreeID: worktreeBID)
+
+        var state = makeState(projectID: projectID, worktreeID: worktreeAID, worktreePath: "/tmp/a")
+
+        let areaB = TabArea(projectPath: "/tmp/b")
+        state.workspaceRoots[keyB] = .tabArea(areaB)
+        state.focusedAreaID[keyB] = areaB.id
+
+        state.activeWorktreeID[projectID] = worktreeBID
+
+        let areaAID = state.workspaceRoots[keyA]!.allAreas()[0].id
+
+        _ = WorkspaceReducer.reduce(
+            action: .splitArea(AppState.SplitAreaRequest(
+                projectID: projectID,
+                areaID: areaAID,
+                direction: .horizontal,
+                position: .second
+            )),
+            state: &state
+        )
+
+        #expect(state.workspaceRoots[keyA]!.allAreas().count == 2)
+        #expect(state.workspaceRoots[keyB]!.allAreas().count == 1)
+        #expect(state.focusedAreaID[keyA] != areaAID)
+        #expect(state.activeWorktreeID[projectID] == worktreeBID)
+    }
+
+    @Test("closeTab finds area in non-active worktree")
+    func closeTabInNonActiveWorktree() {
+        let projectID = UUID()
+        let worktreeAID = UUID()
+        let worktreeBID = UUID()
+        let keyA = WorktreeKey(projectID: projectID, worktreeID: worktreeAID)
+        let keyB = WorktreeKey(projectID: projectID, worktreeID: worktreeBID)
+
+        var state = makeState(projectID: projectID, worktreeID: worktreeAID, worktreePath: "/tmp/a")
+
+        let areaB = TabArea(projectPath: "/tmp/b")
+        state.workspaceRoots[keyB] = .tabArea(areaB)
+        state.focusedAreaID[keyB] = areaB.id
+
+        state.activeWorktreeID[projectID] = worktreeBID
+
+        let areaAID = state.workspaceRoots[keyA]!.allAreas()[0].id
+        let tabInA = state.workspaceRoots[keyA]!.findArea(id: areaAID)!.tabs[0].id
+
+        let areaA = state.workspaceRoots[keyA]!.findArea(id: areaAID)!
+        areaA.createTab()
+        let secondTabInA = areaA.tabs[1].id
+
+        _ = WorkspaceReducer.reduce(
+            action: .closeTab(projectID: projectID, areaID: areaAID, tabID: tabInA),
+            state: &state
+        )
+
+        let areaAfterClose = state.workspaceRoots[keyA]!.findArea(id: areaAID)
+        #expect(areaAfterClose?.tabs.count == 1)
+        #expect(areaAfterClose?.tabs[0].id == secondTabInA)
+        #expect(state.workspaceRoots[keyB]!.allAreas().count == 1)
+        #expect(state.activeWorktreeID[projectID] == worktreeBID)
+    }
+
+    @Test("closeArea finds area in non-active worktree")
+    func closeAreaInNonActiveWorktree() {
+        let projectID = UUID()
+        let worktreeAID = UUID()
+        let worktreeBID = UUID()
+        let keyA = WorktreeKey(projectID: projectID, worktreeID: worktreeAID)
+        let keyB = WorktreeKey(projectID: projectID, worktreeID: worktreeBID)
+
+        var state = makeState(projectID: projectID, worktreeID: worktreeAID, worktreePath: "/tmp/a")
+
+        let areaB = TabArea(projectPath: "/tmp/b")
+        state.workspaceRoots[keyB] = .tabArea(areaB)
+        state.focusedAreaID[keyB] = areaB.id
+
+        state.activeWorktreeID[projectID] = worktreeBID
+
+        let areaAID = state.workspaceRoots[keyA]!.allAreas()[0].id
+
+        _ = WorkspaceReducer.reduce(
+            action: .closeArea(projectID: projectID, areaID: areaAID),
+            state: &state
+        )
+
+        #expect(state.workspaceRoots[keyA] == nil)
+        #expect(state.workspaceRoots[keyB]!.allAreas().count == 1)
+        #expect(state.activeWorktreeID[projectID] == worktreeBID)
+    }
+
+    @Test("keyForArea finds area across all worktrees")
+    func keyForAreaFindsAcrossWorktrees() {
+        let projectID = UUID()
+        let worktreeAID = UUID()
+        let worktreeBID = UUID()
+        let keyA = WorktreeKey(projectID: projectID, worktreeID: worktreeAID)
+        let keyB = WorktreeKey(projectID: projectID, worktreeID: worktreeBID)
+
+        var state = makeState(projectID: projectID, worktreeID: worktreeAID)
+        let areaB = TabArea(projectPath: "/tmp/b")
+        state.workspaceRoots[keyB] = .tabArea(areaB)
+        state.activeWorktreeID[projectID] = worktreeBID
+
+        let areaAID = state.workspaceRoots[keyA]!.allAreas()[0].id
+        let foundKey = WorkspaceReducerShared.keyForArea(projectID: projectID, areaID: areaAID, state: state)
+
+        #expect(foundKey == keyA)
+    }
+
+    @Test("keyForArea returns nil for unknown area")
+    func keyForAreaReturnsNilForUnknownArea() {
+        let state = makeState(projectID: UUID(), worktreeID: UUID())
+        let result = WorkspaceReducerShared.keyForArea(
+            projectID: UUID(),
+            areaID: UUID(),
+            state: state
+        )
+        #expect(result == nil)
+    }
+
+    @Test("splitArea with unknown areaID does nothing")
+    func splitAreaUnknownArea() {
+        let projectID = UUID()
+        let worktreeID = UUID()
+        var state = makeState(projectID: projectID, worktreeID: worktreeID)
+        let key = WorktreeKey(projectID: projectID, worktreeID: worktreeID)
+        let originalRootID = state.workspaceRoots[key]!.id
+
+        _ = WorkspaceReducer.reduce(
+            action: .splitArea(AppState.SplitAreaRequest(
+                projectID: projectID,
+                areaID: UUID(),
+                direction: .horizontal,
+                position: .second
+            )),
+            state: &state
+        )
+
+        #expect(state.workspaceRoots[key]!.id == originalRootID)
+    }
+
+    @Test("closeTab with unknown areaID does nothing")
+    func closeTabUnknownArea() {
+        let projectID = UUID()
+        let worktreeID = UUID()
+        var state = makeState(projectID: projectID, worktreeID: worktreeID)
+        let key = WorktreeKey(projectID: projectID, worktreeID: worktreeID)
+        let originalRootID = state.workspaceRoots[key]!.id
+
+        _ = WorkspaceReducer.reduce(
+            action: .closeTab(projectID: projectID, areaID: UUID(), tabID: UUID()),
+            state: &state
+        )
+
+        #expect(state.workspaceRoots[key]!.id == originalRootID)
+    }
+
+    @Test("closeArea with unknown areaID does nothing")
+    func closeAreaUnknownArea() {
+        let projectID = UUID()
+        let worktreeID = UUID()
+        var state = makeState(projectID: projectID, worktreeID: worktreeID)
+        let key = WorktreeKey(projectID: projectID, worktreeID: worktreeID)
+        let originalRootID = state.workspaceRoots[key]!.id
+
+        _ = WorkspaceReducer.reduce(
+            action: .closeArea(projectID: projectID, areaID: UUID()),
+            state: &state
+        )
+
+        #expect(state.workspaceRoots[key]!.id == originalRootID)
+    }
 }

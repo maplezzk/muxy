@@ -145,7 +145,7 @@ enum WorkspaceReducer {
             )
 
         case let .closeTab(projectID, areaID, tabID):
-            guard let key = WorkspaceReducerShared.activeKey(projectID: projectID, state: state) else { break }
+            guard let key = WorkspaceReducerShared.keyForArea(projectID: projectID, areaID: areaID, state: state) else { break }
             TabReducer.closeTab(tabID, areaID: areaID, key: key, state: &state, effects: &effects)
 
         case let .selectTab(projectID, areaID, tabID):
@@ -164,7 +164,7 @@ enum WorkspaceReducer {
             SplitReducer.splitArea(request, state: &state)
 
         case let .closeArea(projectID, areaID):
-            guard let key = WorkspaceReducerShared.activeKey(projectID: projectID, state: state) else { break }
+            guard let key = WorkspaceReducerShared.keyForArea(projectID: projectID, areaID: areaID, state: state) else { break }
             SplitReducer.closeArea(areaID, key: key, state: &state, effects: &effects)
 
         case let .moveTab(projectID, request):
