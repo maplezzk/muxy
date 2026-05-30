@@ -51,6 +51,7 @@ let package = Package(
                 .copy("Resources/ProviderIcons"),
                 .copy("Resources/rg"),
                 .copy("Resources/scripts"),
+                .copy("Resources/skills"),
                 .copy("Resources/terminfo"),
             ],
             linkerSettings: [
@@ -69,6 +70,7 @@ let package = Package(
                 .linkedFramework("MetalKit"),
                 .linkedFramework("QuartzCore"),
                 .linkedFramework("Speech"),
+                .linkedFramework("UserNotifications"),
                 .linkedLibrary("c++"),
             ]
         ),
@@ -97,6 +99,7 @@ let package = Package(
                 .linkedFramework("MetalKit"),
                 .linkedFramework("QuartzCore"),
                 .linkedFramework("Speech"),
+                .linkedFramework("UserNotifications"),
                 .linkedLibrary("c++"),
             ]
         ),

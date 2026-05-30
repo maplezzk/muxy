@@ -5,6 +5,7 @@ struct ExtensionsView: View {
     @State private var store = ExtensionStore.shared
     @State private var grantStore = ExtensionGrantStore.shared
     @State private var selectedExtensionID: String?
+    @State private var showCreateSheet = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -17,6 +18,12 @@ struct ExtensionsView: View {
         .foregroundStyle(MuxyTheme.fg)
         .tint(MuxyTheme.accent)
         .preferredColorScheme(MuxyTheme.colorScheme)
+        .sheet(isPresented: $showCreateSheet) {
+            CreateExtensionSheet(
+                store: store,
+                onFinish: { showCreateSheet = false }
+            )
+        }
     }
 
     @ViewBuilder
@@ -67,6 +74,15 @@ struct ExtensionsView: View {
             }
             Spacer()
             if selectedExtensionID == nil {
+                Button {
+                    showCreateSheet = true
+                } label: {
+                    Text("Create")
+                        .font(.system(size: 12))
+                        .foregroundStyle(MuxyTheme.accent)
+                }
+                .buttonStyle(.plain)
+                .help("Create a new extension")
                 Button {
                     store.reload()
                 } label: {
@@ -328,7 +344,8 @@ private struct ExtensionStatusBadge: View {
     @MainActor
     private var info: (String, Color) {
         if status.isRunning { return ("running", MuxyTheme.diffAddFg) }
-        if status.muxyExtension.manifest.enabled { return ("stopped", MuxyTheme.fgMuted) }
+        if status.isEnabled, status.muxyExtension.entrypointURL == nil { return ("active", MuxyTheme.diffAddFg) }
+        if status.isEnabled { return ("stopped", MuxyTheme.fgMuted) }
         return ("disabled", MuxyTheme.fgDim)
     }
 }
@@ -715,7 +732,7 @@ private struct ExtensionDetailPage: View {
 
     private var enabledBinding: Binding<Bool> {
         Binding(
-            get: { ext.manifest.enabled },
+            get: { status.isEnabled },
             set: { store.setEnabled($0, for: status.id) }
         )
     }

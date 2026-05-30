@@ -64,6 +64,7 @@ struct MuxyApp: App {
                     NotificationStore.shared.appState = appState
                     NotificationStore.shared.worktreeStore = worktreeStore
                     NotificationStore.shared.markAllAsRead()
+                    DesktopNotificationService.shared.start(appState: appState)
                     MemoryDiagnostics.shared.configure(appState: appState)
                     TerminalProgressStore.shared.appState = appState
                     appDelegate.onTerminate = { [appState] in
@@ -274,6 +275,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     @MainActor
     func applicationDidFinishLaunching(_ notification: Notification) {
+        UserDefaults.standard.register(defaults: ["ApplePressAndHoldEnabled": false])
         SentryService.shared.start()
         NSWindow.allowsAutomaticWindowTabbing = false
         NSApp.setActivationPolicy(.regular)
@@ -285,6 +287,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         ThemeService.shared.migrateToPairedThemeIfNeeded()
         observeSystemAppearanceChanges()
         ModifierKeyMonitor.shared.start()
+        DesktopNotificationService.shared.prepare()
         NotificationSocketServer.shared.openProjectHandler = { [weak self] path in
             Task { @MainActor [weak self] in
                 self?.handleOpenProjectPath(path)

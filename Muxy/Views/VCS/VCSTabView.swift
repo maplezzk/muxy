@@ -1527,35 +1527,38 @@ private struct SectionSplitLayout: View {
         totalHeight: CGFloat,
         allSections: [SectionKind]
     ) -> some View {
-        ResizeHandle(axis: .vertical) { v in
-            guard totalHeight > 0 else { return }
-            let delta = v.translation.height / totalHeight
+        AnchoredResizeHandle(
+            axis: .vertical,
+            captureAnchor: {
+                var baseline = state.sectionRatios
+                if baseline.count < allSections.count {
+                    let fill = 1.0 / CGFloat(allSections.count)
+                    baseline.append(contentsOf: Array(repeating: fill, count: allSections.count - baseline.count))
+                }
+                return baseline
+            },
+            onTranslate: { baseline, translation in
+                guard totalHeight > 0 else { return }
+                guard let aboveIdx = allSections.firstIndex(of: above),
+                      let belowIdx = allSections.firstIndex(of: below),
+                      aboveIdx < baseline.count, belowIdx < baseline.count
+                else { return }
 
-            guard let aboveIdx = allSections.firstIndex(of: above),
-                  let belowIdx = allSections.firstIndex(of: below)
-            else { return }
+                let delta = translation / totalHeight
+                let minRatio: CGFloat = 0.08
 
-            var ratios = state.sectionRatios
-            if ratios.count < allSections.count {
-                let fill = 1.0 / CGFloat(allSections.count)
-                ratios.append(contentsOf: Array(repeating: fill, count: allSections.count - ratios.count))
+                var ratios = baseline
+                ratios[aboveIdx] = max(minRatio, ratios[aboveIdx] + delta)
+                ratios[belowIdx] = max(minRatio, ratios[belowIdx] - delta)
+
+                let sum = ratios.reduce(0, +)
+                if sum > 0 {
+                    ratios = ratios.map { $0 / sum }
+                }
+
+                state.sectionRatios = ratios
             }
-            guard aboveIdx < ratios.count, belowIdx < ratios.count else { return }
-            let minRatio: CGFloat = 0.08
-
-            ratios[aboveIdx] += delta
-            ratios[belowIdx] -= delta
-
-            ratios[aboveIdx] = max(minRatio, ratios[aboveIdx])
-            ratios[belowIdx] = max(minRatio, ratios[belowIdx])
-
-            let sum = ratios.reduce(0, +)
-            if sum > 0 {
-                ratios = ratios.map { $0 / sum }
-            }
-
-            state.sectionRatios = ratios
-        }
+        )
     }
 
     @ViewBuilder

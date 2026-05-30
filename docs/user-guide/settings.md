@@ -59,8 +59,11 @@ See [Voice Recording](../features/voice-recording.md).
 
 ## Notifications
 
+- **Toast** — show an in-app toast on arrival.
+- **Desktop notifications** — show a macOS notification when Muxy is not frontmost.
 - **Toast position** — top or bottom of the window.
 - **Sound** — choose the notification sound.
+- **AI Providers** — enable or disable each provider hook integration.
 - **Per‑source delivery** — separate toggles for Claude Code, OpenCode, OSC sequences, and the socket API.
 
 See [Notifications](../features/notifications.md).

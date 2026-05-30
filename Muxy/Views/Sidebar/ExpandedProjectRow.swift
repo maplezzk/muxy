@@ -31,6 +31,7 @@ struct ExpandedProjectRow: View {
     @State private var isRefreshingWorktrees = false
     @State private var showColorPicker = false
     @State private var showSymbolPicker = false
+    @State private var pendingWorktreeRemoval: WorktreeRemovalConfirmation?
     @State private var removalRequest: WorktreeRemovalRequest?
 
     private var isActive: Bool {
@@ -150,6 +151,23 @@ struct ExpandedProjectRow: View {
                 onSetIcon(name)
                 showSymbolPicker = false
             }
+        }
+        .alert(
+            pendingWorktreeRemoval?.title ?? "",
+            isPresented: worktreeRemovalAlertBinding,
+            presenting: pendingWorktreeRemoval
+        ) { confirmation in
+            Button("Remove", role: .destructive) {
+                performRemove(worktree: confirmation.worktree)
+                pendingWorktreeRemoval = nil
+            }
+            .keyboardShortcut(.defaultAction)
+            Button("Cancel", role: .cancel) {
+                pendingWorktreeRemoval = nil
+            }
+            .keyboardShortcut(.cancelAction)
+        } message: { confirmation in
+            Text(confirmation.message)
         }
     }
 
@@ -391,34 +409,24 @@ struct ExpandedProjectRow: View {
         }
     }
 
+    @MainActor
     private func requestRemove(worktree: Worktree) async {
         let hasChanges = await GitWorktreeService.shared.hasUncommittedChanges(worktreePath: worktree.path)
-        if !hasChanges {
-            performRemove(worktree: worktree)
-            return
-        }
-        presentRemoveConfirmation(worktree: worktree)
+        pendingWorktreeRemoval = WorktreeRemovalConfirmation(
+            worktree: worktree,
+            hasUncommittedChanges: hasChanges
+        )
     }
 
-    private func presentRemoveConfirmation(worktree: Worktree) {
-        guard let window = NSApp.keyWindow ?? NSApp.mainWindow,
-              window.attachedSheet == nil
-        else { return }
-
-        let alert = NSAlert()
-        alert.messageText = "Remove worktree \"\(worktree.name)\"?"
-        alert.informativeText = "This worktree has uncommitted changes. Removing it will permanently discard them."
-        alert.alertStyle = .warning
-        alert.icon = NSApp.applicationIconImage
-        alert.addButton(withTitle: "Remove")
-        alert.addButton(withTitle: "Cancel")
-        alert.buttons[0].keyEquivalent = "\r"
-        alert.buttons[1].keyEquivalent = "\u{1b}"
-
-        alert.beginSheetModal(for: window) { response in
-            guard response == .alertFirstButtonReturn else { return }
-            performRemove(worktree: worktree)
-        }
+    private var worktreeRemovalAlertBinding: Binding<Bool> {
+        Binding(
+            get: { pendingWorktreeRemoval != nil },
+            set: { newValue in
+                if !newValue {
+                    pendingWorktreeRemoval = nil
+                }
+            }
+        )
     }
 
     private func performRemove(worktree: Worktree) {

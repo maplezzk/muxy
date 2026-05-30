@@ -63,6 +63,7 @@ struct MainWindow: View {
         case lastTab
         case unsavedEditor
         case runningProcess
+        case diffComments
 
         var title: String {
             switch self {
@@ -72,6 +73,8 @@ struct MainWindow: View {
                 "Save Changes Before Closing?"
             case .runningProcess:
                 "Close Tab?"
+            case .diffComments:
+                "Discard Comments?"
             }
         }
 
@@ -83,6 +86,8 @@ struct MainWindow: View {
                 "This file has unsaved changes. If you don't save, your changes will be lost."
             case .runningProcess:
                 "A process is still running in this tab. Are you sure you want to close it?"
+            case .diffComments:
+                "This diff has comments that haven't been sent to an agent. Closing will discard them."
             }
         }
     }
@@ -118,7 +123,9 @@ struct MainWindow: View {
     @State private var extensionOutputSelected: String?
     @AppStorage(SidebarCollapsedStyle.storageKey) private var sidebarCollapsedStyleRaw = SidebarCollapsedStyle.defaultValue.rawValue
     @AppStorage(SidebarExpandedStyle.storageKey) private var sidebarExpandedStyleRaw = SidebarExpandedStyle.defaultValue.rawValue
-    @AppStorage("muxy.notifications.toastPosition") private var toastPositionRaw = ToastPosition.topCenter.rawValue
+    @AppStorage("muxy.sidebarExpandedCustomWidth") private var sidebarExpandedCustomWidth: Double = .init(SidebarLayout.expandedWidth)
+    @AppStorage(NotificationSettings.Key.toastPosition)
+    private var toastPositionRaw = NotificationSettings.Default.toastPosition.rawValue
     @AppStorage(RecordingPreferences.autoSendKey) private var recordingAutoSend = RecordingPreferences.defaultAutoSend
     @AppStorage(RecordingPreferences.languageKey) private var recordingLanguage = RecordingPreferences.defaultLanguage
     @State private var voiceRecording = VoiceRecordingState.shared
@@ -127,6 +134,9 @@ struct MainWindow: View {
     var body: some View {
         HStack(spacing: 0) {
             leftNavigationColumn
+            if sidebarIsResizable {
+                sidebarResizeHandle
+            }
             mainWorkspaceColumn
         }
         .animation(.easeInOut(duration: 0.2), value: sidebarExpanded)
@@ -142,24 +152,38 @@ struct MainWindow: View {
         }
         .animation(.easeInOut(duration: 0.2), value: voiceRecording.isPanelVisible)
         .overlay(alignment: toastAlignment) {
-            if let toast = ToastState.shared.message {
-                HStack(spacing: UIMetrics.spacing3) {
+            if let toast = ToastState.shared.content {
+                HStack(alignment: toast.body == nil ? .center : .top, spacing: UIMetrics.spacing3) {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: UIMetrics.fontBody, weight: .semibold))
                         .foregroundStyle(MuxyTheme.diffAddFg)
-                    Text(toast)
-                        .font(.system(size: UIMetrics.fontBody, weight: .medium))
-                        .foregroundStyle(MuxyTheme.fg)
+                    VStack(alignment: .leading, spacing: UIMetrics.spacing1) {
+                        Text(toast.title)
+                            .font(.system(size: UIMetrics.fontBody, weight: .medium))
+                            .foregroundStyle(MuxyTheme.fg)
+                            .lineLimit(1)
+                        if let body = toast.body {
+                            Text(body)
+                                .font(.system(size: UIMetrics.fontFootnote))
+                                .foregroundStyle(MuxyTheme.fgMuted)
+                                .lineLimit(2)
+                        }
+                    }
                 }
                 .padding(.horizontal, UIMetrics.scaled(14))
                 .padding(.vertical, UIMetrics.spacing4)
+                .frame(maxWidth: UIMetrics.scaled(360), alignment: .leading)
                 .background(MuxyTheme.bg, in: Capsule())
                 .overlay(Capsule().stroke(MuxyTheme.border, lineWidth: 1))
+                .contentShape(Capsule())
                 .padding(toastEdgePadding)
                 .transition(.move(edge: toastTransitionEdge).combined(with: .opacity))
-                .allowsHitTesting(false)
-                .accessibilityLabel(toast)
-                .accessibilityAddTraits(.isStaticText)
+                .allowsHitTesting(toast.isActionable)
+                .onTapGesture {
+                    ToastState.shared.performAction()
+                }
+                .accessibilityLabel(toast.accessibilityLabel)
+                .accessibilityAddTraits(toast.isActionable ? .isButton : .isStaticText)
             }
         }
         .overlay { modalOverlayLayer }
@@ -195,6 +219,16 @@ struct MainWindow: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .openProjectPicker)) { _ in
             showProjectPicker = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .openExtensionDirectoryAsProject)) { notification in
+            guard let path = notification.userInfo?[OpenExtensionDirectoryUserInfoKey.path] as? String else { return }
+            CLIAccessor.openProjectFromPath(
+                path,
+                appState: appState,
+                projectStore: projectStore,
+                worktreeStore: worktreeStore,
+                projectGroupStore: projectGroupStore
+            )
         }
         .onReceive(NotificationCenter.default.publisher(for: .terminalOmnibox)) { notification in
             let launchScope = terminalOmniboxScope(from: notification)
@@ -244,18 +278,16 @@ struct MainWindow: View {
             panelVisible: fileTreePanelVisible,
             sync: syncFileTreeSelection
         ))
-        .onChange(of: appState.pendingLastTabClose != nil) { _, isPresented in
-            guard isPresented else { return }
-            presentCloseConfirmation(.lastTab)
-        }
-        .onChange(of: appState.pendingUnsavedEditorTabClose != nil) { _, isPresented in
-            guard isPresented else { return }
-            presentCloseConfirmation(.unsavedEditor)
-        }
-        .onChange(of: appState.pendingProcessTabClose != nil) { _, isPresented in
-            guard isPresented else { return }
-            presentCloseConfirmation(.runningProcess)
-        }
+        .modifier(TabCloseConfirmationObserver(
+            lastTab: appState.pendingLastTabClose != nil,
+            unsavedEditor: appState.pendingUnsavedEditorTabClose != nil,
+            runningProcess: appState.pendingProcessTabClose != nil,
+            diffComments: appState.pendingDiffCommentsTabClose != nil,
+            onLastTab: { presentCloseConfirmation(.lastTab) },
+            onUnsavedEditor: { presentCloseConfirmation(.unsavedEditor) },
+            onRunningProcess: { presentCloseConfirmation(.runningProcess) },
+            onDiffComments: { presentCloseConfirmation(.diffComments) }
+        ))
         .onChange(of: appState.pendingSaveErrorMessage != nil) { _, isPresented in
             guard isPresented, let message = appState.pendingSaveErrorMessage else { return }
             presentSaveErrorAlert(message: message)
@@ -278,13 +310,16 @@ struct MainWindow: View {
                     .accessibilityHidden(true)
             }
 
-            Sidebar(expanded: sidebarExpanded)
+            Sidebar(
+                expanded: sidebarExpanded,
+                expandedCustomWidth: CGFloat(sidebarExpandedCustomWidth)
+            )
         }
         .frame(width: leftNavigationWidth, alignment: .leading)
         .clipped()
         .background(MuxyTheme.bg)
         .overlay(alignment: .trailing) {
-            if leftNavigationWidth > 0 {
+            if leftNavigationWidth > 0, !sidebarIsResizable {
                 Rectangle().fill(MuxyTheme.border)
                     .frame(width: 1)
                     .padding(.top, leftNavigationBorderTopPadding)
@@ -292,7 +327,7 @@ struct MainWindow: View {
             }
         }
         .fixedSize(horizontal: true, vertical: false)
-        .animation(.easeInOut(duration: 0.2), value: leftNavigationWidth)
+        .animation(.easeInOut(duration: 0.2), value: sidebarExpanded)
     }
 
     private var mainWorkspaceColumn: some View {
@@ -320,7 +355,7 @@ struct MainWindow: View {
 
             topBarContent
         }
-        .animation(.easeInOut(duration: 0.2), value: mainTitleBarLeadingInset)
+        .animation(.easeInOut(duration: 0.2), value: sidebarExpanded)
     }
 
     @ViewBuilder
@@ -340,7 +375,7 @@ struct MainWindow: View {
                         }
                     }
                 }
-                .animation(.easeInOut(duration: 0.2), value: titleBarNavigationOverlayWidth)
+                .animation(.easeInOut(duration: 0.2), value: sidebarExpanded)
         }
     }
 
@@ -800,7 +835,7 @@ struct MainWindow: View {
     }
 
     private var toastPosition: ToastPosition {
-        ToastPosition(rawValue: toastPositionRaw) ?? .topCenter
+        NotificationSettings.toastPosition(rawValue: toastPositionRaw)
     }
 
     private var toastAlignment: Alignment {
@@ -844,8 +879,13 @@ struct MainWindow: View {
         SidebarLayout.resolvedWidth(
             expanded: sidebarExpanded,
             collapsedStyle: sidebarCollapsedStyle,
-            expandedStyle: sidebarExpandedStyle
+            expandedStyle: sidebarExpandedStyle,
+            expandedCustomWidth: CGFloat(sidebarExpandedCustomWidth)
         )
+    }
+
+    private var sidebarIsResizable: Bool {
+        SidebarLayout.isWide(expanded: sidebarExpanded, expandedStyle: sidebarExpandedStyle)
     }
 
     private var leftNavigationWidth: CGFloat {
@@ -1020,24 +1060,22 @@ struct MainWindow: View {
             switch position {
             case .right:
                 HStack(spacing: 0) {
-                    sidePanelResizeHandle { delta in
-                        let next = richInputPanelWidth - Double(delta)
-                        richInputPanelWidth = max(
-                            Double(RichInputPanelLayout.minWidth),
-                            min(Double(RichInputPanelLayout.maxWidth), next)
-                        )
-                    }
+                    panelResize(
+                        axis: .horizontal,
+                        edge: .leading,
+                        value: $richInputPanelWidth,
+                        range: RichInputPanelLayout.minWidth ... RichInputPanelLayout.maxWidth
+                    )
                     panel.frame(width: CGFloat(richInputPanelWidth))
                 }
             case .bottom:
                 VStack(spacing: 0) {
-                    bottomPanelResizeHandle { delta in
-                        let next = richInputPanelHeight - Double(delta)
-                        richInputPanelHeight = max(
-                            Double(RichInputPanelLayout.minHeight),
-                            min(Double(RichInputPanelLayout.maxHeight), next)
-                        )
-                    }
+                    panelResize(
+                        axis: .vertical,
+                        edge: .top,
+                        value: $richInputPanelHeight,
+                        range: RichInputPanelLayout.minHeight ... RichInputPanelLayout.maxHeight
+                    )
                     panel.frame(height: CGFloat(richInputPanelHeight))
                 }
             }
@@ -1050,24 +1088,23 @@ struct MainWindow: View {
             richInputPanelContent(at: .right)
         } else if vcsPanelVisible, VCSDisplayMode.current == .attached, let state = activeVCSState {
             HStack(spacing: 0) {
-                sidePanelResizeHandle { delta in
-                    vcsPanelWidth = max(
-                        AttachedVCSLayout.minWidth,
-                        min(AttachedVCSLayout.maxWidth, vcsPanelWidth - delta)
-                    )
-                }
+                panelResize(
+                    axis: .horizontal,
+                    edge: .leading,
+                    value: $vcsPanelWidth,
+                    range: AttachedVCSLayout.minWidth ... AttachedVCSLayout.maxWidth
+                )
                 VCSTabView(state: state, focused: false, onFocus: {})
                     .frame(width: vcsPanelWidth)
             }
         } else if fileTreePanelVisible, let treeState = activeFileTreeState {
             HStack(spacing: 0) {
-                sidePanelResizeHandle { delta in
-                    let next = fileTreePanelWidth - Double(delta)
-                    fileTreePanelWidth = max(
-                        Double(FileTreeLayout.minWidth),
-                        min(Double(FileTreeLayout.maxWidth), next)
-                    )
-                }
+                panelResize(
+                    axis: .horizontal,
+                    edge: .leading,
+                    value: $fileTreePanelWidth,
+                    range: FileTreeLayout.minWidth ... FileTreeLayout.maxWidth
+                )
                 FileTreeView(
                     state: treeState,
                     onOpenFile: { filePath in
@@ -1092,18 +1129,30 @@ struct MainWindow: View {
         }
     }
 
-    private func sidePanelResizeHandle(onDrag: @escaping (CGFloat) -> Void) -> some View {
-        ResizeHandle(axis: .horizontal) { v in
-            onDrag(v.translation.width)
-        }
-        .accessibilityHidden(true)
+    private var sidebarResizeHandle: some View {
+        panelResize(
+            axis: .horizontal,
+            edge: .trailing,
+            value: $sidebarExpandedCustomWidth,
+            range: SidebarLayout.minExpandedWidth ... SidebarLayout.maxExpandedWidth
+        )
+        .padding(.top, leftNavigationBorderTopPadding)
     }
 
-    private func bottomPanelResizeHandle(onDrag: @escaping (CGFloat) -> Void) -> some View {
-        ResizeHandle(axis: .vertical) { v in
-            onDrag(v.translation.height)
-        }
-        .accessibilityHidden(true)
+    private func panelResize<V: BinaryFloatingPoint>(
+        axis: ResizeHandle.Axis,
+        edge: PanelResizeHandle.Edge,
+        value: Binding<V>,
+        range: ClosedRange<CGFloat>
+    ) -> some View {
+        PanelResizeHandle(
+            axis: axis,
+            edge: edge,
+            current: { CGFloat(value.wrappedValue) },
+            apply: { next in
+                value.wrappedValue = V(min(range.upperBound, max(range.lowerBound, next)))
+            }
+        )
     }
 
     private var activeFileTreeState: FileTreeState? {
@@ -1398,7 +1447,8 @@ struct MainWindow: View {
             alert.buttons[2].keyEquivalent = "d"
             alert.buttons[2].keyEquivalentModifierMask = [.command]
         case .lastTab,
-             .runningProcess:
+             .runningProcess,
+             .diffComments:
             alert.addButton(withTitle: "Close")
             alert.addButton(withTitle: "Cancel")
             alert.buttons[0].keyEquivalent = "\r"
@@ -1435,6 +1485,12 @@ struct MainWindow: View {
                     appState.confirmCloseRunningTab()
                 } else {
                     appState.cancelCloseRunningTab()
+                }
+            case .diffComments:
+                if response == .alertFirstButtonReturn {
+                    appState.confirmCloseDiffCommentsTab()
+                } else {
+                    appState.cancelCloseDiffCommentsTab()
                 }
             }
         }
@@ -1519,6 +1575,37 @@ private struct FileTreeSelectionSync: ViewModifier {
             .onChange(of: panelVisible) { _, visible in
                 guard visible else { return }
                 sync(filePath)
+            }
+    }
+}
+
+private struct TabCloseConfirmationObserver: ViewModifier {
+    let lastTab: Bool
+    let unsavedEditor: Bool
+    let runningProcess: Bool
+    let diffComments: Bool
+    let onLastTab: () -> Void
+    let onUnsavedEditor: () -> Void
+    let onRunningProcess: () -> Void
+    let onDiffComments: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: lastTab) { _, isPresented in
+                guard isPresented else { return }
+                onLastTab()
+            }
+            .onChange(of: unsavedEditor) { _, isPresented in
+                guard isPresented else { return }
+                onUnsavedEditor()
+            }
+            .onChange(of: runningProcess) { _, isPresented in
+                guard isPresented else { return }
+                onRunningProcess()
+            }
+            .onChange(of: diffComments) { _, isPresented in
+                guard isPresented else { return }
+                onDiffComments()
             }
     }
 }

@@ -6,7 +6,7 @@ import Testing
 @testable import Muxy
 @testable import MuxyShared
 
-@Suite("Model coverage")
+@Suite("Model coverage", .serialized)
 @MainActor
 struct ModelCoverageTests {
     @Test("Project icon colors resolve ids, hex values, and foreground preference")

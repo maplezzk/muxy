@@ -268,7 +268,7 @@ struct ExtensionManifest: Codable, Equatable {
     let name: String
     let version: String
     let description: String?
-    let entrypoint: String
+    let entrypoint: String?
     let events: [String]
     let commands: [ExtensionPaletteCommand]
     let tabTypes: [ExtensionTabType]
@@ -277,7 +277,6 @@ struct ExtensionManifest: Codable, Equatable {
     let topbarItems: [ExtensionTopbarItem]
     let statusBarItems: [ExtensionStatusBarItem]
     let settings: [ExtensionSettingEntry]
-    let enabled: Bool
 
     private enum CodingKeys: String, CodingKey {
         case name
@@ -292,14 +291,13 @@ struct ExtensionManifest: Codable, Equatable {
         case topbarItems
         case statusBarItems
         case settings
-        case enabled
     }
 
     init(
         name: String,
         version: String,
         description: String? = nil,
-        entrypoint: String,
+        entrypoint: String? = nil,
         events: [String] = [],
         commands: [ExtensionPaletteCommand] = [],
         tabTypes: [ExtensionTabType] = [],
@@ -307,8 +305,7 @@ struct ExtensionManifest: Codable, Equatable {
         aiProvider: ExtensionAIProvider? = nil,
         topbarItems: [ExtensionTopbarItem] = [],
         statusBarItems: [ExtensionStatusBarItem] = [],
-        settings: [ExtensionSettingEntry] = [],
-        enabled: Bool = true
+        settings: [ExtensionSettingEntry] = []
     ) {
         self.name = name
         self.version = version
@@ -322,7 +319,6 @@ struct ExtensionManifest: Codable, Equatable {
         self.topbarItems = topbarItems
         self.statusBarItems = statusBarItems
         self.settings = settings
-        self.enabled = enabled
     }
 
     init(from decoder: Decoder) throws {
@@ -330,7 +326,7 @@ struct ExtensionManifest: Codable, Equatable {
         name = try container.decode(String.self, forKey: .name)
         version = try container.decode(String.self, forKey: .version)
         description = try container.decodeIfPresent(String.self, forKey: .description)
-        entrypoint = try container.decode(String.self, forKey: .entrypoint)
+        entrypoint = try container.decodeIfPresent(String.self, forKey: .entrypoint)
         events = try container.decodeIfPresent([String].self, forKey: .events) ?? []
         commands = try container.decodeIfPresent([ExtensionPaletteCommand].self, forKey: .commands) ?? []
         tabTypes = try container.decodeIfPresent([ExtensionTabType].self, forKey: .tabTypes) ?? []
@@ -339,7 +335,6 @@ struct ExtensionManifest: Codable, Equatable {
         topbarItems = try container.decodeIfPresent([ExtensionTopbarItem].self, forKey: .topbarItems) ?? []
         statusBarItems = try container.decodeIfPresent([ExtensionStatusBarItem].self, forKey: .statusBarItems) ?? []
         settings = try container.decodeIfPresent([ExtensionSettingEntry].self, forKey: .settings) ?? []
-        enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
     }
 
     func tabType(id: String) -> ExtensionTabType? {
@@ -352,24 +347,6 @@ struct ExtensionManifest: Codable, Equatable {
 
     func statusBarItem(id: String) -> ExtensionStatusBarItem? {
         statusBarItems.first { $0.id == id }
-    }
-
-    func withEnabled(_ enabled: Bool) -> ExtensionManifest {
-        ExtensionManifest(
-            name: name,
-            version: version,
-            description: description,
-            entrypoint: entrypoint,
-            events: events,
-            commands: commands,
-            tabTypes: tabTypes,
-            permissions: permissions,
-            aiProvider: aiProvider,
-            topbarItems: topbarItems,
-            statusBarItems: statusBarItems,
-            settings: settings,
-            enabled: enabled
-        )
     }
 }
 
@@ -458,8 +435,9 @@ struct MuxyExtension: Identifiable, Equatable {
     let directory: URL
     let manifest: ExtensionManifest
 
-    var entrypointURL: URL {
-        directory.appendingPathComponent(manifest.entrypoint)
+    var entrypointURL: URL? {
+        guard let entrypoint = manifest.entrypoint else { return nil }
+        return directory.appendingPathComponent(entrypoint)
     }
 
     var displayName: String { manifest.name }
@@ -506,12 +484,13 @@ enum ExtensionManifestLoader {
 
         try validate(name: manifest.name)
 
-        let entrypoint = directory.appendingPathComponent(manifest.entrypoint)
-        guard FileManager.default.fileExists(atPath: entrypoint.path) else {
-            throw ExtensionLoadError.entrypointMissing(entrypoint)
-        }
-        guard FileManager.default.isExecutableFile(atPath: entrypoint.path) else {
-            throw ExtensionLoadError.entrypointNotExecutable(entrypoint)
+        if let entrypoint = manifest.entrypoint.map(directory.appendingPathComponent) {
+            guard FileManager.default.fileExists(atPath: entrypoint.path) else {
+                throw ExtensionLoadError.entrypointMissing(entrypoint)
+            }
+            guard FileManager.default.isExecutableFile(atPath: entrypoint.path) else {
+                throw ExtensionLoadError.entrypointNotExecutable(entrypoint)
+            }
         }
 
         let muxyExtension = MuxyExtension(id: manifest.name, directory: directory, manifest: manifest)
@@ -521,11 +500,22 @@ enum ExtensionManifestLoader {
         try validateStatusBarItems(manifest: manifest, in: muxyExtension)
         try validateSettings(manifest: manifest)
 
+        migrateLegacyEnabledFlag(rawManifest: data, extensionID: manifest.name)
+
         return muxyExtension
+    }
+
+    private static func migrateLegacyEnabledFlag(rawManifest: Data, extensionID: String) {
+        guard !ExtensionEnabledStore.hasOverride(extensionID: extensionID) else { return }
+        guard let object = try? JSONSerialization.jsonObject(with: rawManifest) as? [String: Any],
+              let legacyValue = object["enabled"] as? Bool
+        else { return }
+        ExtensionEnabledStore.setEnabled(legacyValue, extensionID: extensionID)
     }
 
     static func validate(name: String) throws {
         guard !name.isEmpty else { throw ExtensionLoadError.invalidName(name) }
+        guard !name.hasPrefix(".") else { throw ExtensionLoadError.invalidName(name) }
         for scalar in name.unicodeScalars where !allowedNameCharacters.contains(scalar) {
             throw ExtensionLoadError.invalidName(name)
         }

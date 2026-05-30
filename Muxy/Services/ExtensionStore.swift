@@ -12,6 +12,7 @@ final class ExtensionStore {
     struct ExtensionStatus: Identifiable, Equatable {
         let id: String
         let muxyExtension: MuxyExtension
+        var isEnabled: Bool
         var isRunning: Bool
         var lastError: String?
 
@@ -34,6 +35,7 @@ final class ExtensionStore {
 
     private var processes: [String: Process] = [:]
     private var tokens: [String: String] = [:]
+    private var intentionalStops: Set<String> = []
     private let rootDirectoryURL: URL
 
     private init(rootDirectory: URL = ExtensionStore.defaultRootDirectory) {
@@ -49,7 +51,7 @@ final class ExtensionStore {
 
     func startAll() {
         loadFromDisk()
-        for index in statuses.indices where statuses[index].muxyExtension.manifest.enabled {
+        for index in statuses.indices where statuses[index].isEnabled {
             startExtension(at: index)
         }
         rebuildExtensionUICache()
@@ -73,18 +75,8 @@ final class ExtensionStore {
 
     func setEnabled(_ enabled: Bool, for extensionID: String) {
         guard let index = statuses.firstIndex(where: { $0.id == extensionID }) else { return }
-        let updatedExtension = MuxyExtension(
-            id: statuses[index].muxyExtension.id,
-            directory: statuses[index].muxyExtension.directory,
-            manifest: statuses[index].muxyExtension.manifest.withEnabled(enabled)
-        )
-
-        statuses[index] = ExtensionStatus(
-            id: updatedExtension.id,
-            muxyExtension: updatedExtension,
-            isRunning: statuses[index].isRunning,
-            lastError: statuses[index].lastError
-        )
+        ExtensionEnabledStore.setEnabled(enabled, extensionID: extensionID)
+        statuses[index].isEnabled = enabled
 
         if enabled, !statuses[index].isRunning {
             startExtension(at: index)
@@ -105,12 +97,12 @@ final class ExtensionStore {
     }
 
     func loadedExtension(id: String) -> MuxyExtension? {
-        statuses.first(where: { $0.id == id && $0.muxyExtension.manifest.enabled })?.muxyExtension
+        statuses.first(where: { $0.id == id && $0.isEnabled })?.muxyExtension
     }
 
     func snapshotForSocketServer() -> NotificationSocketServer.ExtensionSnapshot {
         var entries: [String: NotificationSocketServer.ExtensionSnapshotEntry] = [:]
-        for status in statuses where status.muxyExtension.manifest.enabled {
+        for status in statuses where status.isEnabled {
             let manifest = status.muxyExtension.manifest
             guard let token = tokens[status.id] else { continue }
             entries[status.id] = NotificationSocketServer.ExtensionSnapshotEntry(
@@ -127,20 +119,21 @@ final class ExtensionStore {
         NotificationSocketServer.shared.applyExtensionSnapshot(snapshotForSocketServer())
     }
 
-    static func buildSnapshotForTesting(from extensions: [MuxyExtension], token: String = "test-token") -> NotificationSocketServer
-        .ExtensionSnapshot
-    {
-        var entries: [String: NotificationSocketServer.ExtensionSnapshotEntry] = [:]
-        for ext in extensions where ext.manifest.enabled {
+    static func buildSnapshotForTesting(
+        from entries: [(MuxyExtension, isEnabled: Bool)],
+        token: String = "test-token"
+    ) -> NotificationSocketServer.ExtensionSnapshot {
+        var result: [String: NotificationSocketServer.ExtensionSnapshotEntry] = [:]
+        for (ext, isEnabled) in entries where isEnabled {
             let manifest = ext.manifest
-            entries[ext.id] = NotificationSocketServer.ExtensionSnapshotEntry(
+            result[ext.id] = NotificationSocketServer.ExtensionSnapshotEntry(
                 allowedEvents: Set(manifest.events),
                 commandEvents: Set(manifest.commands.map(\.eventName)),
                 permissions: Set(manifest.permissions),
                 token: token
             )
         }
-        return NotificationSocketServer.ExtensionSnapshot(entries: entries)
+        return NotificationSocketServer.ExtensionSnapshot(entries: result)
     }
 
     struct PaletteCommandBinding: Equatable {
@@ -171,7 +164,7 @@ final class ExtensionStore {
 
     func paletteCommands() -> [PaletteCommandBinding] {
         statuses
-            .filter(\.muxyExtension.manifest.enabled)
+            .filter(\.isEnabled)
             .flatMap { status in
                 status.muxyExtension.manifest.commands.map { PaletteCommandBinding(muxyExtension: status.muxyExtension, command: $0) }
             }
@@ -185,7 +178,7 @@ final class ExtensionStore {
         var topbar: [TopbarItemBinding] = []
         var left: [StatusBarItemBinding] = []
         var right: [StatusBarItemBinding] = []
-        for status in statuses where status.muxyExtension.manifest.enabled {
+        for status in statuses where status.isEnabled {
             let ext = status.muxyExtension
             let overrides = statusBarTextOverrides[status.id]
             for item in ext.manifest.topbarItems {
@@ -340,7 +333,7 @@ final class ExtensionStore {
     }
 
     func declaredAIProvider(for socketTypeKey: String) -> (extensionID: String, provider: ExtensionAIProvider)? {
-        for status in statuses where status.muxyExtension.manifest.enabled {
+        for status in statuses where status.isEnabled {
             if let provider = status.muxyExtension.manifest.aiProvider,
                provider.socketTypeKey == socketTypeKey
             {
@@ -388,6 +381,7 @@ final class ExtensionStore {
                 statuses.append(ExtensionStatus(
                     id: ext.id,
                     muxyExtension: ext,
+                    isEnabled: ExtensionEnabledStore.isEnabled(extensionID: ext.id),
                     isRunning: false,
                     lastError: nil
                 ))
@@ -405,8 +399,10 @@ final class ExtensionStore {
         let status = statuses[index]
         let ext = status.muxyExtension
 
+        guard let entrypointURL = ext.entrypointURL else { return }
+
         let process = Process()
-        process.executableURL = ext.entrypointURL
+        process.executableURL = entrypointURL
         process.currentDirectoryURL = ext.directory
 
         let token = Self.generateToken()
@@ -468,6 +464,7 @@ final class ExtensionStore {
         tokens.removeValue(forKey: extensionID)
         guard let process = processes.removeValue(forKey: extensionID) else { return }
         if process.isRunning {
+            intentionalStops.insert(extensionID)
             process.terminate()
         }
         if let index = statuses.firstIndex(where: { $0.id == extensionID }) {
@@ -485,16 +482,36 @@ final class ExtensionStore {
     }
 
     private func handleTermination(extensionID: String, process: Process) {
+        guard processes[extensionID] === process else { return }
         processes.removeValue(forKey: extensionID)
+        let wasIntentional = intentionalStops.remove(extensionID) != nil
         guard let index = statuses.firstIndex(where: { $0.id == extensionID }) else { return }
         statuses[index].isRunning = false
-        let status = process.terminationStatus
-        if status != 0 {
+        let outcome = Self.classifyTermination(
+            wasIntentional: wasIntentional,
+            terminationStatus: process.terminationStatus
+        )
+        switch outcome {
+        case .stopped:
+            ExtensionLogStore.shared.append(extensionID: extensionID, line: "[muxy] stopped")
+        case .exitedCleanly:
+            ExtensionLogStore.shared.append(extensionID: extensionID, line: "[muxy] exited cleanly")
+        case let .exitedWithStatus(status):
             let message = "Process exited with status \(status)"
             statuses[index].lastError = message
             ExtensionLogStore.shared.append(extensionID: extensionID, line: "[muxy] \(message)")
-        } else {
-            ExtensionLogStore.shared.append(extensionID: extensionID, line: "[muxy] exited cleanly")
         }
+    }
+
+    enum TerminationOutcome: Equatable {
+        case stopped
+        case exitedCleanly
+        case exitedWithStatus(Int32)
+    }
+
+    nonisolated static func classifyTermination(wasIntentional: Bool, terminationStatus: Int32) -> TerminationOutcome {
+        if wasIntentional { return .stopped }
+        if terminationStatus == 0 { return .exitedCleanly }
+        return .exitedWithStatus(terminationStatus)
     }
 }
