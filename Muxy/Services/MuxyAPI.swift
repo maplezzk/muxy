@@ -746,6 +746,8 @@ private func collectTabs(appState: AppState) -> Set<UUID> {
     return ids
 }
 
+private let defaultHeadlessTerminalSize = NSSize(width: 640, height: 400)
+
 @MainActor
 private func waitForView(
     paneID: UUID,
@@ -770,7 +772,7 @@ private func waitForView(
     if view.envVars.isEmpty {
         view.envVars = TerminalEnvVarBuilder.build(paneID: paneID, worktreeKey: loc.key)
     }
-    view.setFrameSize(NSSize(width: 640, height: 400))
+    view.setFrameSize(defaultHeadlessTerminalSize)
     view.materializeHeadless()
     if view.surface != nil {
         return view
