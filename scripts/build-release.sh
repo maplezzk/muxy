@@ -91,9 +91,6 @@ DMG_NAME="Muxy-${VERSION}-${ARCH}.dmg"
 
 rm -rf "$APP_BUNDLE"
 rm -rf "$DSYM_BUNDLE"
-trash "$BUILD_DIR/$DMG_NAME" 2>/dev/null || true
-
-rm -rf "$PROJECT_ROOT/.build/arm64-apple-macosx/release/Muxy" 2>/dev/null || true
 
 echo "==> Building for $ARCH ($TRIPLE)"
 cd "$PROJECT_ROOT"
@@ -195,8 +192,7 @@ if ! command -v create-dmg &> /dev/null; then
 fi
 
 cd "$BUILD_DIR"
-trash "$BUILD_DIR/$DMG_NAME" 2>/dev/null || true
-create-dmg "$APP_BUNDLE" "$BUILD_DIR"
+create-dmg "$APP_BUNDLE" "$BUILD_DIR" || true
 
 GENERATED_DMG=$(find "$BUILD_DIR" -maxdepth 1 -name "Muxy*.dmg" -not -name "$DMG_NAME" | head -1)
 if [[ -n "$GENERATED_DMG" ]]; then
