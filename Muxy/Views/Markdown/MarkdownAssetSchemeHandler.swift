@@ -26,7 +26,8 @@ final class MarkdownAssetSchemeHandler: NSObject, WKURLSchemeHandler {
 
         let filename = url.lastPathComponent
         guard Self.allowedFiles.contains(filename),
-              let resourceURL = Bundle.appResources.url(forResource: filename, withExtension: nil),
+              let resourceURL = Bundle.appResources.url(forResource: filename, withExtension: nil, subdirectory: "markdown-assets") ??
+              Bundle.appResources.url(forResource: filename, withExtension: nil),
               let data = try? Data(contentsOf: resourceURL)
         else {
             urlSchemeTask.didFailWithError(URLError(.fileDoesNotExist))
