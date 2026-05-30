@@ -138,6 +138,47 @@ struct SocketCommandHandlerTests {
         #expect(UUID(uuidString: result) != nil)
     }
 
+    @Test("split-right with from pane in background worktree splits in same worktree")
+    func splitWithFromPaneInBackgroundWorktree() async {
+        let projectID = UUID()
+        let activeWorktreeID = UUID()
+        let bgWorktreeID = UUID()
+        let appState = AppState(
+            selectionStore: SelectionStoreStub(),
+            terminalViews: TerminalViewRemovingStub(),
+            workspacePersistence: WorkspacePersistenceStub()
+        )
+        let activeKey = WorktreeKey(projectID: projectID, worktreeID: activeWorktreeID)
+        let bgKey = WorktreeKey(projectID: projectID, worktreeID: bgWorktreeID)
+        let activeArea = TabArea(projectPath: testPath)
+        let bgArea = TabArea(projectPath: "/tmp/bg")
+        appState.activeProjectID = projectID
+        appState.activeWorktreeID[projectID] = activeWorktreeID
+        appState.workspaceRoots[activeKey] = .tabArea(activeArea)
+        appState.workspaceRoots[bgKey] = .tabArea(bgArea)
+        appState.focusedAreaID[activeKey] = activeArea.id
+        appState.focusedAreaID[bgKey] = bgArea.id
+
+        let fromPaneID = bgArea.tabs.first!.content.pane!.id
+        let result = await SocketCommandHandler.handleRequest(
+            "split-right|" + fromPaneID.uuidString + "|",
+            appState: appState
+        )
+        #expect(!result.hasPrefix("error:"))
+        guard let newPaneID = UUID(uuidString: result) else {
+            Issue.record("Expected valid pane UUID, got \(result)")
+            return
+        }
+        let bgRoot = appState.workspaceRoots[bgKey]
+        let allBgPaneIDs = bgRoot?.allAreas().flatMap { $0.tabs.compactMap { $0.content.pane?.id } } ?? []
+        #expect(allBgPaneIDs.contains(newPaneID), "New pane should be in background worktree")
+
+        let allActivePaneIDs = appState.workspaceRoots[activeKey]?.allAreas().flatMap {
+            $0.tabs.compactMap { $0.content.pane?.id }
+        } ?? []
+        #expect(!allActivePaneIDs.contains(newPaneID), "New pane should not be in active worktree")
+    }
+
     @Test("list-projects returns projects with active marker")
     func listProjects() async {
         let project = Project(name: "Test Project", path: testPath)

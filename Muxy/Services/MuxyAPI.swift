@@ -749,23 +749,40 @@ private func collectTabs(appState: AppState) -> Set<UUID> {
 @MainActor
 private func waitForView(
     paneID: UUID,
-    appState: AppState? = nil,
+    appState: AppState,
     timeout: Duration = .seconds(3)
 ) async -> GhosttyTerminalNSView? {
     if let view = TerminalViewRegistry.shared.existingView(for: paneID) {
         return view
     }
-    if let appState, locateTab(paneID: paneID, appState: appState) == nil {
-        return nil
+    guard let loc = locateTab(paneID: paneID, appState: appState),
+          let area = appState.workspaceRoots[loc.key]?.findArea(id: loc.areaID),
+          let tab = area.tabs.first(where: { $0.id == loc.tabID }),
+          let pane = tab.content.pane
+    else { return nil }
+    let view = TerminalViewRegistry.shared.view(
+        for: paneID,
+        workingDirectory: pane.currentWorkingDirectory ?? pane.projectPath,
+        command: pane.startupCommand,
+        commandInteractive: pane.startupCommandInteractive,
+        closesOnCommandExit: pane.closesOnStartupCommandExit
+    )
+    if view.envVars.isEmpty {
+        view.envVars = TerminalEnvVarBuilder.build(paneID: paneID, worktreeKey: loc.key)
+    }
+    view.setFrameSize(NSSize(width: 640, height: 400))
+    view.materializeHeadless()
+    if view.surface != nil {
+        return view
     }
     let deadline = ContinuousClock.now + timeout
     while ContinuousClock.now < deadline {
-        if let view = TerminalViewRegistry.shared.existingView(for: paneID) {
+        if view.surface != nil {
             return view
         }
         try? await Task.sleep(for: .milliseconds(50))
     }
-    return nil
+    return view.surface != nil ? view : nil
 }
 
 @MainActor

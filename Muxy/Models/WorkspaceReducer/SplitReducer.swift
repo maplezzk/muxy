@@ -3,18 +3,17 @@ import Foundation
 @MainActor
 enum SplitReducer {
     static func splitArea(_ request: AppState.SplitAreaRequest, state: inout WorkspaceState) {
-        guard let key = WorkspaceReducerShared.activeKey(projectID: request.projectID, state: state),
-              let root = state.workspaceRoots[key]
+        guard let entry = state.workspaceRoots.first(where: { $0.value.containsArea(id: request.areaID) })
         else { return }
-        let (newRoot, newAreaID) = root.splitting(
+        let (newRoot, newAreaID) = entry.value.splitting(
             areaID: request.areaID,
             direction: request.direction,
             position: request.position,
             command: request.command
         )
-        state.workspaceRoots[key] = newRoot
+        state.workspaceRoots[entry.key] = newRoot
         guard let newAreaID else { return }
-        FocusReducer.focusArea(newAreaID, key: key, state: &state)
+        FocusReducer.focusArea(newAreaID, key: entry.key, state: &state)
     }
 
     static func closeArea(

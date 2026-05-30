@@ -44,7 +44,7 @@ send_command() {
         exit 1
     fi
     local response
-    response=$(printf '%s\n' "$message" | nc -w "$NC_TIMEOUT" -U "$SOCKET" 2>/dev/null)
+    response=$( { printf '%s\n' "$message"; sleep 0.3; } | nc -w "$NC_TIMEOUT" -U "$SOCKET" 2>/dev/null)
     if [ -z "$response" ]; then
         echo "Error: no response from Muxy" >&2
         exit 1
