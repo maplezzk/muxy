@@ -25,10 +25,11 @@ extension Bundle {
         if let resourceURL = Bundle.main.resourceURL {
             candidates.append(resourceURL.appendingPathComponent("ProviderIcons"))
         }
-        candidates.append(contentsOf: [
-            Bundle.main.bundleURL.appendingPathComponent("ProviderIcons"),
-            Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/ProviderIcons"),
-        ])
+        candidates.append(Bundle.main.bundleURL.appendingPathComponent("ProviderIcons"))
+        candidates.append(Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/ProviderIcons"))
+        if let resourceURL = appResources.resourceURL {
+            candidates.append(resourceURL.appendingPathComponent("ProviderIcons"))
+        }
 
         for candidate in candidates {
             var isDirectory: ObjCBool = false

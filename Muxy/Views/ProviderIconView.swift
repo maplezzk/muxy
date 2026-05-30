@@ -62,7 +62,8 @@ struct ProviderIconView: View {
             }
         }
 
-        if let url = Bundle.appResources.url(forResource: name, withExtension: "svg") ??
+        if let url = Bundle.appResources.url(forResource: name, withExtension: "svg", subdirectory: "ProviderIcons") ??
+            Bundle.appResources.url(forResource: name, withExtension: "svg") ??
             Bundle.main.url(forResource: name, withExtension: "svg")
         {
             return NSImage(contentsOf: url)
