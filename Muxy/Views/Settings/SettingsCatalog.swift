@@ -59,6 +59,40 @@ enum SettingsRoute: Hashable, Identifiable {
         case let .ext(extensionID): "ext.\(extensionID)"
         }
     }
+
+    init?(storedID: String) {
+        if storedID.hasPrefix("builtin.") {
+            let rawCategory = String(storedID.dropFirst("builtin.".count))
+            guard let category = SettingsCategory(rawValue: rawCategory) else { return nil }
+            self = .builtin(category)
+            return
+        }
+
+        if storedID.hasPrefix("ext.") {
+            let extensionID = String(storedID.dropFirst("ext.".count))
+            guard !extensionID.isEmpty else { return nil }
+            self = .ext(extensionID)
+            return
+        }
+
+        return nil
+    }
+}
+
+enum SettingsRouteSelectionStore {
+    static let storageKey = "muxy.settings.selectedRoute"
+    static let fallbackRoute = SettingsRoute.builtin(.general)
+
+    static func load(defaults: UserDefaults = .standard) -> SettingsRoute {
+        guard let storedID = defaults.string(forKey: storageKey),
+              let route = SettingsRoute(storedID: storedID)
+        else { return fallbackRoute }
+        return route
+    }
+
+    static func save(_ route: SettingsRoute, defaults: UserDefaults = .standard) {
+        defaults.set(route.id, forKey: storageKey)
+    }
 }
 
 struct SettingsCatalogItem: Identifiable, Equatable {
