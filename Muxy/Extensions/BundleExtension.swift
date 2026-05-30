@@ -22,11 +22,6 @@ extension Bundle {
     static var providerIconsURL: URL? {
         var candidates: [URL] = []
 
-        if let resourceURL = Bundle.main.resourceURL {
-            candidates.append(resourceURL.appendingPathComponent("ProviderIcons"))
-        }
-        candidates.append(Bundle.main.bundleURL.appendingPathComponent("ProviderIcons"))
-        candidates.append(Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/ProviderIcons"))
         if let resourceURL = appResources.resourceURL {
             candidates.append(resourceURL.appendingPathComponent("ProviderIcons"))
         }
