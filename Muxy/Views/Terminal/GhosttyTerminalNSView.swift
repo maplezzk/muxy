@@ -287,7 +287,7 @@ final class GhosttyTerminalNSView: NSView {
 
         guard let window else { return }
 
-        if surface == nil, !isOfflinedState || isPaneVisible {
+        if surface == nil, !isOfflinedState, isPaneVisible {
             createSurface()
         }
 
@@ -408,6 +408,18 @@ final class GhosttyTerminalNSView: NSView {
         destroySurface()
         isOfflinedState = true
         onOfflineChange?(true)
+    }
+
+    func wakeFromOffline() {
+        guard isOfflinedState, surface == nil else { return }
+        materializeHeadless()
+        guard surface != nil else { return }
+        isOfflinedState = false
+        processExitHandled = false
+        if let surface {
+            ghostty_surface_set_occlusion(surface, true)
+        }
+        onOfflineChange?(false)
     }
 
     func applyColorScheme(isDark: Bool) {

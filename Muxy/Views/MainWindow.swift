@@ -323,7 +323,13 @@ struct MainWindow: View {
                     } else if let project = activeProjectWithWorkspace,
                               let activeKey = appState.activeWorktreeKey(for: project.id)
                     {
-                        ForEach(mountedWorktreeKeys(for: project), id: \.self) { key in
+                        let paneIDs = TerminalViewRegistry.shared.allPaneIDs
+                        let snapshot = Self.liveWorktreesSnapshot(
+                            paneIDs: paneIDs,
+                            in: appState,
+                            projects: projectStore.projects
+                        )
+                        ForEach(snapshot.activeWorktrees, id: \.self) { key in
                             TerminalArea(
                                 project: project,
                                 worktreeKey: key,
@@ -332,6 +338,16 @@ struct MainWindow: View {
                             .opacity(key == activeKey ? 1 : 0)
                             .allowsHitTesting(key == activeKey)
                             .zIndex(key == activeKey ? 1 : 0)
+                        }
+                        ForEach(snapshot.backgroundWorktrees, id: \.key) { entry in
+                            TerminalArea(
+                                project: entry.project,
+                                worktreeKey: entry.key,
+                                isActiveProject: false
+                            )
+                            .opacity(0)
+                            .allowsHitTesting(false)
+                            .zIndex(-1)
                         }
                     }
                 }
@@ -813,11 +829,59 @@ struct MainWindow: View {
         )
     }
 
-    private func mountedWorktreeKeys(for project: Project) -> [WorktreeKey] {
-        guard let activeKey = appState.activeWorktreeKey(for: project.id),
-              appState.workspaceRoots[activeKey] != nil
-        else { return [] }
-        return [activeKey]
+    struct LiveWorktreesSnapshot: Equatable {
+        let activeProjectID: UUID?
+        let activeWorktrees: [WorktreeKey]
+        let backgroundWorktrees: [BackgroundWorktreeEntry]
+    }
+
+    struct BackgroundWorktreeEntry: Hashable {
+        let project: Project
+        let key: WorktreeKey
+    }
+
+    static func liveWorktreesSnapshot(
+        paneIDs: [UUID],
+        in appState: AppState,
+        projects: [Project]
+    ) -> LiveWorktreesSnapshot {
+        let activeProjectID = appState.activeProjectID
+        var paneToKey: [UUID: WorktreeKey] = [:]
+        for (key, root) in appState.workspaceRoots {
+            for area in root.allAreas() {
+                for tab in area.tabs {
+                    if let pane = tab.content.pane {
+                        paneToKey[pane.id] = key
+                    }
+                }
+            }
+        }
+        let projectsByID = Dictionary(uniqueKeysWithValues: projects.map { ($0.id, $0) })
+        var activeKeys = Set<WorktreeKey>()
+        var backgroundEntries: [BackgroundWorktreeEntry] = []
+        var seenBackground = Set<WorktreeKey>()
+        if let activeProjectID,
+           let activeKey = appState.activeWorktreeKey(for: activeProjectID),
+           appState.workspaceRoots[activeKey] != nil
+        {
+            activeKeys.insert(activeKey)
+        }
+        for paneID in paneIDs {
+            guard let key = paneToKey[paneID] else { continue }
+            if key.projectID == activeProjectID {
+                activeKeys.insert(key)
+            } else {
+                guard !seenBackground.contains(key) else { continue }
+                seenBackground.insert(key)
+                guard let project = projectsByID[key.projectID] else { continue }
+                backgroundEntries.append(BackgroundWorktreeEntry(project: project, key: key))
+            }
+        }
+        return LiveWorktreesSnapshot(
+            activeProjectID: activeProjectID,
+            activeWorktrees: activeKeys.sorted(by: { $0.worktreeID.uuidString < $1.worktreeID.uuidString }),
+            backgroundWorktrees: backgroundEntries.sorted(by: { $0.key.worktreeID.uuidString < $1.key.worktreeID.uuidString })
+        )
     }
 
     private var isTerminalPaneFocused: Bool {

@@ -1,6 +1,8 @@
 import AppKit
+import Observation
 
 @MainActor
+@Observable
 final class TerminalViewRegistry {
     static let shared = TerminalViewRegistry()
 
@@ -65,6 +67,10 @@ final class TerminalViewRegistry {
 
     var liveViews: [GhosttyTerminalNSView] {
         Array(views.values)
+    }
+
+    var allPaneIDs: [UUID] {
+        Array(views.keys)
     }
 
     var liveViewCount: Int {
