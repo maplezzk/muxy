@@ -533,28 +533,31 @@ final class NotificationSocketServer: @unchecked Sendable {
     }
 
     private func processCommand(_ message: String, session: ClientSession) {
+        let isExtensionSession = session.extensionID != nil
         guard let handler = commandHandler else {
-            enqueueWrite(session: session, text: "error:no handler registered\n")
+            enqueueCommandReply(session: session, response: "error:no handler registered", isExtensionSession: isExtensionSession)
             return
         }
         guard session.inFlightCommandCount < ClientSession.maxConcurrentCommands else {
-            enqueueWrite(session: session, text: "error:too many concurrent commands\n")
+            enqueueCommandReply(session: session, response: "error:too many concurrent commands", isExtensionSession: isExtensionSession)
             return
         }
         let context = ClientContext(extensionID: session.extensionID)
         session.commandInFlight = true
         session.inFlightCommandCount += 1
-        let isExtensionSession = session.extensionID != nil
         Task { @Sendable [weak self] in
             let response = await handler(message, context)
             guard let self else { return }
             self.queue.async { [weak self] in
-                let reply = Self.framedCommandReply(response: response, isExtensionSession: isExtensionSession)
-                self?.enqueueData(session: session, data: reply)
+                self?.enqueueCommandReply(session: session, response: response, isExtensionSession: isExtensionSession)
                 session.inFlightCommandCount -= 1
                 session.commandInFlight = session.inFlightCommandCount > 0
             }
         }
+    }
+
+    private func enqueueCommandReply(session: ClientSession, response: String, isExtensionSession: Bool) {
+        enqueueData(session: session, data: Self.framedCommandReply(response: response, isExtensionSession: isExtensionSession))
     }
 
     static func framedCommandReply(response: String, isExtensionSession: Bool) -> Data {

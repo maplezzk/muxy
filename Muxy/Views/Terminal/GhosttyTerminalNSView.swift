@@ -287,7 +287,7 @@ final class GhosttyTerminalNSView: NSView {
 
         guard let window else { return }
 
-        if surface == nil, !isOfflinedState, isPaneVisible {
+        if surface == nil, !isOfflinedState || isPaneVisible {
             createSurface()
         }
 
