@@ -1055,51 +1055,44 @@ private enum WaitForViewResult {
 }
 
 @MainActor
-private func ensureSurfaceReady(
-    view: GhosttyTerminalNSView,
-    timeout: Duration = .seconds(3)
-) async -> GhosttyTerminalNSView? {
-    if view.isTakenOffline {
-        view.wakeFromOffline()
-        return view.surface != nil ? view : nil
-    }
-    return view.ensureLiveSurfaceForExternalIO() ? view : nil
-}
-
-@MainActor
 private func waitForView(
     paneID: UUID,
     appState: AppState? = nil,
     timeout: Duration = .seconds(3)
 ) async -> WaitForViewResult {
     let start = ContinuousClock.now
-    if let view = TerminalViewRegistry.shared.existingView(for: paneID) {
-        if let view = await ensureSurfaceReady(view: view, timeout: timeout) {
-            return .view(view)
-        }
-        return .surfaceNotReady(waited: ContinuousClock.now - start)
+    guard let appState else {
+        return await waitForRegisteredView(paneID: paneID, start: start, timeout: timeout)
     }
-    if let appState, locateTab(paneID: paneID, appState: appState) == nil {
+    guard appState.locatePane(paneID: paneID) != nil else {
         return .notFound
     }
+    if let view = TerminalSurfaceMaterializer.materialize(paneID: paneID, appState: appState) {
+        return .view(view)
+    }
+    return .surfaceNotReady(waited: ContinuousClock.now - start)
+}
+
+@MainActor
+private func waitForRegisteredView(
+    paneID: UUID,
+    start: ContinuousClock.Instant,
+    timeout: Duration
+) async -> WaitForViewResult {
     let deadline = ContinuousClock.now + timeout
     while ContinuousClock.now < deadline {
         if let view = TerminalViewRegistry.shared.existingView(for: paneID) {
-            let remaining = deadline - ContinuousClock.now
-            if let view = await ensureSurfaceReady(view: view, timeout: remaining) {
-                return .view(view)
-            }
-            return .surfaceNotReady(waited: ContinuousClock.now - start)
+            return view.ensureLiveSurfaceForExternalIO()
+                ? .view(view)
+                : .surfaceNotReady(waited: ContinuousClock.now - start)
         }
         do {
             try await Task.sleep(for: .milliseconds(50))
-        } catch is CancellationError {
-            return .surfaceNotReady(waited: ContinuousClock.now - start)
         } catch {
             return .surfaceNotReady(waited: ContinuousClock.now - start)
         }
     }
-    return .surfaceNotReady(waited: ContinuousClock.now - start)
+    return .notFound
 }
 
 @MainActor

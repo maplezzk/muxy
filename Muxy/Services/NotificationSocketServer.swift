@@ -362,6 +362,8 @@ final class NotificationSocketServer: @unchecked Sendable {
 
     private static let maxMessageSize = 128 * 1024
 
+    static let commandReplyTerminator: UInt8 = 0
+
     private static let stickyCommandNames: Set<String> = [
         "subscribe", "identify",
     ]
@@ -542,19 +544,35 @@ final class NotificationSocketServer: @unchecked Sendable {
         let context = ClientContext(extensionID: session.extensionID)
         session.commandInFlight = true
         session.inFlightCommandCount += 1
+        let isExtensionSession = session.extensionID != nil
         Task { @Sendable [weak self] in
             let response = await handler(message, context)
             guard let self else { return }
             self.queue.async { [weak self] in
-                self?.enqueueWrite(session: session, text: response + "\n")
+                let reply = Self.framedCommandReply(response: response, isExtensionSession: isExtensionSession)
+                self?.enqueueData(session: session, data: reply)
                 session.inFlightCommandCount -= 1
                 session.commandInFlight = session.inFlightCommandCount > 0
             }
         }
     }
 
+    static func framedCommandReply(response: String, isExtensionSession: Bool) -> Data {
+        if isExtensionSession {
+            return Data((response + "\n").utf8)
+        }
+        var data = Data(response.utf8)
+        data.append(commandReplyTerminator)
+        return data
+    }
+
     private func enqueueWrite(session: ClientSession, text: String) {
         session.writeBuffer.append(contentsOf: Data(text.utf8))
+        flushWrites(session: session)
+    }
+
+    private func enqueueData(session: ClientSession, data: Data) {
+        session.writeBuffer.append(data)
         flushWrites(session: session)
     }
 
