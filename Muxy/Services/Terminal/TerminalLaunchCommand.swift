@@ -2,6 +2,19 @@ import Foundation
 
 enum TerminalLaunchCommand {
     static let environmentKey = "MUXY_STARTUP_COMMAND"
+    static let daemonSessionCommandKey = "MUXYD_SESSION_COMMAND"
+
+    static func daemonShimCommand(muxydPath: String, sessionID: UUID) -> String {
+        "exec \(ShellEscaper.escape(muxydPath)) shim \(sessionID.uuidString)"
+    }
+
+    static func daemonSessionCommand(interactive: Bool, keepsShellOpen: Bool, shell: String = UserShell.path()) -> String {
+        shellCommand(interactive: interactive, keepsShellOpen: keepsShellOpen, shell: shell)
+    }
+
+    static func daemonDefaultSessionCommand(shell: String = UserShell.path()) -> String {
+        "exec \(ShellEscaper.escape(shell)) -l"
+    }
 
     static func shellCommand(
         interactive: Bool,

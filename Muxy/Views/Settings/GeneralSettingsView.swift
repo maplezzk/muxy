@@ -5,6 +5,8 @@ struct GeneralSettingsView: View {
     private var updateChannelRaw = UpdateChannel.stable.rawValue
     @AppStorage(QuitConfirmationPreferences.confirmQuitKey)
     private var confirmQuit = true
+    @AppStorage(DaemonSessionSettings.enabledKey)
+    private var daemonSessions = true
     @State private var sentry = SentryService.shared
 
     var body: some View {
@@ -23,6 +25,18 @@ struct GeneralSettingsView: View {
                     .labelsHidden()
                     .frame(width: SettingsMetrics.controlWidth, alignment: .trailing)
                 }
+            }
+
+            SettingsSection(
+                "Terminal",
+                footer: "Keeps terminal sessions running in the background when Muxy quits, "
+                    + "and restores them on the next launch.",
+                showsDivider: true
+            ) {
+                SettingsToggleRow(
+                    label: "Keep sessions alive after quit",
+                    isOn: $daemonSessions
+                )
             }
 
             SettingsSection("Quit", showsDivider: sentry.hasDSN) {

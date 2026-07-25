@@ -54,6 +54,10 @@ final class TerminalViewRegistry {
         guard let view = views.removeValue(forKey: paneID) else { return }
         paneIDs.removeValue(forKey: ObjectIdentifier(view))
         TerminalCommandTracker.shared.removePane(paneID)
+        if let sessionID = view.daemonSessionID {
+            DaemonSessionMetadataStore.shared.invalidate(sessionID: sessionID)
+            DaemonSessionTerminator.terminate(sessionID: sessionID)
+        }
         view.tearDown()
     }
 

@@ -10,6 +10,7 @@ let package = Package(
     products: [
         .library(name: "MuxyShared", targets: ["MuxyShared"]),
         .executable(name: "muxy-hook", targets: ["MuxyHookBridge"]),
+        .executable(name: "muxyd", targets: ["MuxyDaemon"]),
     ],
     dependencies: [
         .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.9.1"),
@@ -58,10 +59,30 @@ let package = Package(
             ],
             path: "MuxyServer"
         ),
+        .target(
+            name: "MuxyDaemonC",
+            path: "MuxyDaemonC",
+            publicHeadersPath: "include"
+        ),
+        .target(
+            name: "MuxyDaemonKit",
+            dependencies: [
+                "MuxyDaemonC",
+            ],
+            path: "MuxyDaemonKit"
+        ),
+        .executableTarget(
+            name: "MuxyDaemon",
+            dependencies: [
+                "MuxyDaemonKit",
+            ],
+            path: "MuxyDaemon"
+        ),
         .executableTarget(
             name: "Muxy",
             dependencies: [
                 "GhosttyKit",
+                "MuxyDaemonKit",
                 "MuxyShared",
                 "MuxyServer",
                 .product(name: "Sparkle", package: "Sparkle"),
@@ -105,6 +126,7 @@ let package = Package(
             name: "MuxyTests",
             dependencies: [
                 "Muxy",
+                "MuxyDaemonKit",
                 "MuxyShared",
                 "MuxyServer",
                 "MuxyExtensionHost",

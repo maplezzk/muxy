@@ -56,12 +56,33 @@ else
   done
 fi
 
+needs_daemon_build=false
+
+if [[ ! -x "$daemon_binary" ]]; then
+  needs_daemon_build=true
+else
+  for path in \
+    "$root/Package.swift" \
+    "$root/MuxyDaemon"/**/*.(.) \
+    "$root/MuxyDaemonC"/**/*.(.) \
+    "$root/MuxyDaemonKit"/**/*(.); do
+    if [[ "$path" -nt "$daemon_binary" ]]; then
+      needs_daemon_build=true
+      break
+    fi
+  done
+fi
+
 if [[ "$needs_build" == true ]]; then
   swift build --product Muxy --skip-update
 fi
 
 if [[ "$needs_hook_build" == true ]]; then
   swift build --product muxy-hook --skip-update
+fi
+
+if [[ "$needs_daemon_build" == true ]]; then
+  swift build --product muxyd --skip-update
 fi
 
 exec "$binary" "${args[@]}"

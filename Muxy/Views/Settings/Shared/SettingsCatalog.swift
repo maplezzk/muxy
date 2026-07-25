@@ -287,6 +287,14 @@ enum SettingsCatalog {
             defaultValue: true
         ),
         SettingsCatalogItem(
+            key: DaemonSessionSettings.enabledKey,
+            title: "Keep Sessions Alive After Quit",
+            description: "Keeps terminal sessions running in the background when Muxy quits.",
+            category: .general,
+            section: "Terminal",
+            defaultValue: true
+        ),
+        SettingsCatalogItem(
             key: "muxy.sentry.consent",
             title: "Crash Reports",
             description: "Controls anonymous crash report consent when diagnostics are available.",

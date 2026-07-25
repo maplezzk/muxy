@@ -59,6 +59,9 @@ final class GhosttyTerminalNSView: NSView {
     }
 
     var foregroundProcessID: Int32? {
+        if let daemonSessionID {
+            return DaemonSessionMetadataStore.shared.foregroundProcessID(for: daemonSessionID)
+        }
         guard let surface else { return nil }
         let processID = ghostty_surface_foreground_pid(surface)
         guard processID > 0, processID <= UInt64(Int32.max) else { return nil }
@@ -128,6 +131,7 @@ final class GhosttyTerminalNSView: NSView {
     }
 
     private var pendingSurfaceCreation = false
+    private(set) var daemonSessionID: UUID?
 
     func createSurface() {
         guard surface == nil, let app = GhosttyService.shared.app else { return }
@@ -169,6 +173,35 @@ final class GhosttyTerminalNSView: NSView {
             )) {
                 surfaceCStringPointers.append(remoteWrapped)
                 config.command = UnsafePointer(remoteWrapped)
+                config.wait_after_command = false
+            }
+        } else if DaemonSessionSettings.isEnabled,
+                  let sessionID = TerminalViewRegistry.shared.paneID(for: self),
+                  let muxydPath = MuxydBinaryLocator.binaryPath()
+        {
+            daemonSessionID = sessionID
+            if let shimWrapped = strdup(TerminalLaunchCommand.daemonShimCommand(
+                muxydPath: muxydPath,
+                sessionID: sessionID
+            )),
+                let sessionCommandKey = strdup(TerminalLaunchCommand.daemonSessionCommandKey),
+                let sessionCommandValue = strdup(launchCommand.map { _ in
+                    TerminalLaunchCommand.daemonSessionCommand(
+                        interactive: commandInteractive,
+                        keepsShellOpen: !commandClosesOnExit
+                    )
+                } ?? TerminalLaunchCommand.daemonDefaultSessionCommand())
+            {
+                surfaceCStringPointers.append(contentsOf: [shimWrapped, sessionCommandKey, sessionCommandValue])
+                cEnvVars.append(ghostty_env_var_s(key: sessionCommandKey, value: sessionCommandValue))
+                if let command = launchCommand,
+                   let commandKey = strdup(TerminalLaunchCommand.environmentKey),
+                   let commandValue = strdup(command)
+                {
+                    surfaceCStringPointers.append(contentsOf: [commandKey, commandValue])
+                    cEnvVars.append(ghostty_env_var_s(key: commandKey, value: commandValue))
+                }
+                config.command = UnsafePointer(shimWrapped)
                 config.wait_after_command = false
             }
         } else if let command = launchCommand,
@@ -633,6 +666,9 @@ final class GhosttyTerminalNSView: NSView {
     private static let systemShortcutKeys: Set<String> = ["q", "h", "m", ","]
 
     func needsConfirmQuit() -> Bool {
+        if daemonSessionID != nil {
+            return false
+        }
         guard let surface else { return false }
         return ghostty_surface_needs_confirm_quit(surface)
     }
