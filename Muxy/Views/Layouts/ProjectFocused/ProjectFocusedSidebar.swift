@@ -285,7 +285,7 @@ struct ProjectFocusedSidebar: View {
 
     private var scrollableProjects: some View {
         ScrollView(.vertical, showsIndicators: false) {
-            LazyVStack(spacing: UIMetrics.spacing3) {
+            VStack(spacing: UIMetrics.spacing3) {
                 if let homeProject {
                     projectRow(for: homeProject, shortcutIndex: 1)
                 }
