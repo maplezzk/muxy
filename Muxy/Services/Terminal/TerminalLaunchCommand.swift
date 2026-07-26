@@ -5,7 +5,7 @@ enum TerminalLaunchCommand {
     static let daemonSessionCommandKey = "MUXYD_SESSION_COMMAND"
 
     static func daemonShimCommand(muxydPath: String, sessionID: UUID) -> String {
-        "exec \(ShellEscaper.escape(muxydPath)) shim \(sessionID.uuidString)"
+        "\(ShellEscaper.escape(muxydPath)) shim \(sessionID.uuidString)"
     }
 
     static func daemonSessionCommand(interactive: Bool, keepsShellOpen: Bool, shell: String = UserShell.path()) -> String {

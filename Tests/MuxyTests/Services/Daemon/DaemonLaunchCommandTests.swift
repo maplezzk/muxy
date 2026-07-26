@@ -5,11 +5,11 @@ import Testing
 
 @Suite("TerminalLaunchCommand daemon helpers")
 struct DaemonLaunchCommandTests {
-    @Test("shim command execs muxyd with the session ID")
+    @Test("shim command runs muxyd with the session ID")
     func shimCommand() {
         let sessionID = UUID()
         let command = TerminalLaunchCommand.daemonShimCommand(muxydPath: "/Applications/Muxy.app/Contents/MacOS/muxyd", sessionID: sessionID)
-        #expect(command.hasPrefix("exec "))
+        #expect(!command.hasPrefix("exec "))
         #expect(command.contains("muxyd"))
         #expect(command.contains("shim"))
         #expect(command.contains(sessionID.uuidString))
