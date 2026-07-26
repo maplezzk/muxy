@@ -397,6 +397,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         observeQuickTerminalEnabledChanges()
         startQuickTerminal()
         DesktopNotificationService.shared.prepare()
+        DaemonSessionWarmup.startDaemonIfNeeded()
         NotificationSocketServer.shared.openProjectHandler = { [weak self] path in
             Task { @MainActor [weak self] in
                 self?.handleOpenProjectPath(path)

@@ -26,6 +26,7 @@ public final class MuxyDaemonServer {
     private let socketPath: String
     private let log: (String) -> Void
     private var listenFD: Int32 = -1
+    private var instanceLockFD: Int32 = -1
     private var boundSocketIdentity: (device: dev_t, inode: ino_t)?
     private var clients: [Int32: ClientConnection] = [:]
     private var sessions: [UUID: MuxyDaemonSession] = [:]
@@ -54,6 +55,10 @@ public final class MuxyDaemonServer {
 
     public func run() throws {
         try MuxyDaemonPaths.ensureDirectory()
+        guard acquireInstanceLock() else {
+            log("another muxyd instance holds the lock, exiting")
+            return
+        }
         try openListener()
         running = true
         lastActivity = Date()
@@ -122,6 +127,21 @@ public final class MuxyDaemonServer {
 
     public func stop() {
         running = false
+    }
+
+    private var instanceLockPath: String {
+        socketPath + ".lock"
+    }
+
+    private func acquireInstanceLock() -> Bool {
+        let fd = open(instanceLockPath, O_CREAT | O_RDWR, 0o600)
+        guard fd >= 0 else { return false }
+        guard flock(fd, LOCK_EX | LOCK_NB) == 0 else {
+            close(fd)
+            return false
+        }
+        instanceLockFD = fd
+        return true
     }
 
     private func openListener() throws {
@@ -439,6 +459,10 @@ public final class MuxyDaemonServer {
             if stat(socketPath, &current) == 0, current.st_dev == identity.device, current.st_ino == identity.inode {
                 unlink(socketPath)
             }
+        }
+        if instanceLockFD >= 0 {
+            close(instanceLockFD)
+            instanceLockFD = -1
         }
     }
 }

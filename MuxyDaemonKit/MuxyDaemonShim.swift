@@ -8,8 +8,9 @@ public enum MuxyDaemonShimError: Error, Equatable {
 }
 
 public struct MuxyDaemonShim {
-    public static let spawnRetryCount = 40
+    public static let spawnRetryCount = 1200
     public static let spawnRetryDelay: useconds_t = 50000
+    public static let spawnProgressLogInterval = 100
 
     public let socketPath: String
     public let daemonExecutablePath: String
@@ -78,12 +79,15 @@ public struct MuxyDaemonShim {
         }
         try spawnDaemon()
         var lastError: (any Error)?
-        for _ in 0 ..< Self.spawnRetryCount {
+        for attempt in 0 ..< Self.spawnRetryCount {
             do {
                 try client.connect(socketPath: socketPath)
                 return
             } catch {
                 lastError = error
+                if attempt > 0, attempt % Self.spawnProgressLogInterval == 0 {
+                    log("still waiting for daemon (\(attempt / 20)s)")
+                }
                 usleep(Self.spawnRetryDelay)
             }
         }
@@ -95,6 +99,7 @@ public struct MuxyDaemonShim {
         guard pid >= 0 else {
             throw MuxyDaemonShimError.daemonUnavailable(String(cString: strerror(errno)))
         }
+        log("spawned daemon pid \(pid)")
     }
 
     private func currentTerminalSize() -> (cols: UInt16, rows: UInt16) {

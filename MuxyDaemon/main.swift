@@ -26,6 +26,8 @@ enum MuxyDaemonCommand {
     }
 
     private static func runDaemon() -> Int32 {
+        try? MuxyDaemonPaths.ensureDirectory()
+        daemonLog("muxyd daemon starting pid \(ProcessInfo.processInfo.processIdentifier)")
         let server = MuxyDaemonServer(socketPath: MuxyDaemonPaths.socketPath, log: daemonLog)
         do {
             try server.run()

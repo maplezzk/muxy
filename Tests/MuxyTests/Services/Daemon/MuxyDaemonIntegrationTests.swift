@@ -253,6 +253,26 @@ struct MuxyDaemonIntegrationTests {
         #expect(message.contains("shim"))
     }
 
+    @Test("second server instance exits without stealing the socket")
+    func singleInstanceLock() throws {
+        let socketPath = makeSocketPath()
+        let (first, firstThread) = startServer(socketPath: socketPath)
+        defer { stopServer(first, thread: firstThread, socketPath: socketPath) }
+
+        let second = MuxyDaemonServer(socketPath: socketPath, idleExitEnabled: false, log: { _ in })
+        try second.run()
+
+        let sessionID = UUID()
+        let (client, reader, attached) = try attachShim(
+            socketPath: socketPath,
+            sessionID: sessionID,
+            create: DaemonCreateParams(workingDirectory: "/tmp", command: "/bin/cat", environment: [:])
+        )
+        defer { client.close() }
+        #expect(attached.created)
+        #expect(first.sessionCount == 1)
+    }
+
     @Test("protocol version mismatch is rejected")
     func versionMismatch() throws {
         let socketPath = makeSocketPath()
