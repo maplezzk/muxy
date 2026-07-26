@@ -19,7 +19,7 @@ public struct MuxyDaemonShim {
     public init(
         socketPath: String,
         daemonExecutablePath: String,
-        log: @escaping (String) -> Void = { FileHandle.standardError.write(Data(("muxyd-shim: " + $0 + "\n").utf8)) }
+        log: @escaping (String) -> Void = { FileHandle.standardError.write(Data(("muxyd-shim: " + $0 + "\r\n").utf8)) }
     ) {
         self.socketPath = socketPath
         self.daemonExecutablePath = daemonExecutablePath
@@ -27,6 +27,22 @@ public struct MuxyDaemonShim {
     }
 
     public func run(sessionID: UUID, workingDirectory: String, command: String, environment: [String: String]) -> Int32 {
+        var savedTermios = termios()
+        let rawModeApplied = isatty(STDIN_FILENO) == 1
+            && tcgetattr(STDIN_FILENO, &savedTermios) == 0
+        if rawModeApplied {
+            var raw = savedTermios
+            cfmakeraw(&raw)
+            tcsetattr(STDIN_FILENO, TCSANOW, &raw)
+        }
+        defer {
+            if rawModeApplied {
+                tcsetattr(STDIN_FILENO, TCSANOW, &savedTermios)
+            }
+        }
+
+        installSignalHandlers()
+
         let client = MuxyDaemonClient()
         do {
             try connectWithSpawn(client: client)
@@ -66,7 +82,6 @@ public struct MuxyDaemonShim {
             return 1
         }
 
-        installSignalHandlers(client: client, reader: reader)
         return pumpLoop(client: client, reader: reader)
     }
 
@@ -113,7 +128,7 @@ public struct MuxyDaemonShim {
         return (80, 24)
     }
 
-    private func installSignalHandlers(client _: MuxyDaemonClient, reader _: DaemonFrameReader) {
+    private func installSignalHandlers() {
         signal(SIGWINCH) { _ in
             MuxyDaemonShimSharedState.winChReceived = true
         }
@@ -122,8 +137,13 @@ public struct MuxyDaemonShim {
 
     private func pumpLoop(client: MuxyDaemonClient, reader: DaemonFrameReader) -> Int32 {
         client.setBlocking(false)
+        let originalStdoutFlags = fcntl(STDOUT_FILENO, F_GETFL)
+        _ = fcntl(STDOUT_FILENO, F_SETFL, originalStdoutFlags | O_NONBLOCK)
+        defer { _ = fcntl(STDOUT_FILENO, F_SETFL, originalStdoutFlags) }
+
         var stdinBuffer = [UInt8](repeating: 0, count: 65536)
         var socketBuffer = [UInt8](repeating: 0, count: 65536)
+        var outbound = Data()
         var exitStatus: Int32 = 0
         var shouldExit = false
         var stdinClosed = false
@@ -131,11 +151,13 @@ public struct MuxyDaemonShim {
 
         do {
             while let frame = try reader.nextFrame() {
-                if handleIncoming(frame: frame, exitStatus: &exitStatus) {
+                if handleIncoming(frame: frame, outbound: &outbound, exitStatus: &exitStatus) {
+                    flushBlocking(outbound)
                     return exitStatus
                 }
             }
         } catch {
+            flushBlocking(outbound)
             return exitStatus
         }
 
@@ -146,15 +168,18 @@ public struct MuxyDaemonShim {
                 try? client.send(control: .resize(cols: size.cols, rows: size.rows))
             }
 
-            if stdinClosed, Date() >= drainDeadline {
+            if stdinClosed, outbound.isEmpty, Date() >= drainDeadline {
                 break
             }
+
+            flushOutbound(&outbound)
 
             var descriptors = [
                 pollfd(fd: STDIN_FILENO, events: Int16(stdinClosed ? 0 : POLLIN), revents: 0),
                 pollfd(fd: client.fileDescriptor, events: Int16(POLLIN), revents: 0),
+                pollfd(fd: STDOUT_FILENO, events: Int16(outbound.isEmpty ? 0 : POLLOUT), revents: 0),
             ]
-            let ready = poll(&descriptors, 2, 100)
+            let ready = poll(&descriptors, 3, 100)
             if ready < 0 {
                 if errno == EINTR {
                     continue
@@ -184,7 +209,7 @@ public struct MuxyDaemonShim {
                     reader.append(Data(socketBuffer[0 ..< count]))
                     do {
                         while let frame = try reader.nextFrame() {
-                            if handleIncoming(frame: frame, exitStatus: &exitStatus) {
+                            if handleIncoming(frame: frame, outbound: &outbound, exitStatus: &exitStatus) {
                                 shouldExit = true
                                 break
                             }
@@ -202,13 +227,43 @@ public struct MuxyDaemonShim {
                 shouldExit = true
             }
         }
+
+        flushBlocking(outbound)
         return exitStatus
     }
 
-    private func handleIncoming(frame: DaemonFrame, exitStatus: inout Int32) -> Bool {
+    private func flushOutbound(_ outbound: inout Data) {
+        while !outbound.isEmpty {
+            let written = outbound.withUnsafeBytes { rawBuffer -> Int in
+                guard let baseAddress = rawBuffer.baseAddress else { return 0 }
+                return write(STDOUT_FILENO, baseAddress, rawBuffer.count)
+            }
+            if written > 0 {
+                outbound.removeFirst(written)
+                continue
+            }
+            if written < 0, errno == EINTR {
+                continue
+            }
+            if written < 0, errno == EAGAIN || errno == EWOULDBLOCK {
+                return
+            }
+            outbound.removeAll()
+            return
+        }
+    }
+
+    private func flushBlocking(_ outbound: Data) {
+        guard !outbound.isEmpty else { return }
+        let flags = fcntl(STDOUT_FILENO, F_GETFL)
+        _ = fcntl(STDOUT_FILENO, F_SETFL, flags & ~O_NONBLOCK)
+        writeAllStdout(outbound)
+    }
+
+    private func handleIncoming(frame: DaemonFrame, outbound: inout Data, exitStatus: inout Int32) -> Bool {
         switch frame.type {
         case .sessionOutput:
-            writeAllStdout(frame.payload)
+            outbound.append(frame.payload)
             return false
         case .control:
             if let message = try? frame.decodeControl(), case let .exited(status) = message {
