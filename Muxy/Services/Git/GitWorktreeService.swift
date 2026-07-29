@@ -29,75 +29,10 @@ protocol GitWorktreeListing {
     func listWorktrees(repoPath: String) async throws -> [GitWorktreeRecord]
 }
 
-actor GitRepositoryCheckCoordinator {
-    typealias Check = @Sendable (String, WorkspaceContext) async -> Bool
-
-    private struct Key: Hashable {
-        let path: String
-        let context: WorkspaceContext
-    }
-
-    private struct InFlightCheck {
-        let id: UUID
-        let task: Task<Bool, Never>
-    }
-
-    private let maxConcurrentChecks: Int
-    private let check: Check
-    private var activeCheckCount = 0
-    private var permitWaiters: [CheckedContinuation<Void, Never>] = []
-    private var inFlightChecks: [Key: InFlightCheck] = [:]
-
-    init(maxConcurrentChecks: Int, check: @escaping Check) {
-        precondition(maxConcurrentChecks > 0)
-        self.maxConcurrentChecks = maxConcurrentChecks
-        self.check = check
-    }
-
-    func isGitRepository(_ path: String, context: WorkspaceContext) async -> Bool {
-        let key = Key(path: path, context: context)
-        if let inFlightCheck = inFlightChecks[key] {
-            return await inFlightCheck.task.value
-        }
-
-        let id = UUID()
-        let task = Task {
-            await acquirePermit()
-            let result = await check(path, context)
-            releasePermit()
-            return result
-        }
-        inFlightChecks[key] = InFlightCheck(id: id, task: task)
-
-        let result = await task.value
-        if inFlightChecks[key]?.id == id {
-            inFlightChecks.removeValue(forKey: key)
-        }
-        return result
-    }
-
-    private func acquirePermit() async {
-        guard activeCheckCount >= maxConcurrentChecks else {
-            activeCheckCount += 1
-            return
-        }
-        await withCheckedContinuation { continuation in
-            permitWaiters.append(continuation)
-        }
-    }
-
-    private func releasePermit() {
-        guard !permitWaiters.isEmpty else {
-            activeCheckCount -= 1
-            return
-        }
-        permitWaiters.removeFirst().resume()
-    }
-}
-
 actor GitWorktreeService: GitWorktreeListing {
     static let shared = GitWorktreeService()
-    private static let maxConcurrentRepositoryChecks = 4
+    private static let maxConcurrentRepositoryChecksPerContext = 4
+    private static let localRepositoryCheckTimeout = Duration.seconds(10)
 
     private let repositoryCheckCoordinator: GitRepositoryCheckCoordinator
 
@@ -115,25 +50,45 @@ actor GitWorktreeService: GitWorktreeListing {
         }
     }
 
-    init() {
+    private init() {
         repositoryCheckCoordinator = GitRepositoryCheckCoordinator(
-            maxConcurrentChecks: Self.maxConcurrentRepositoryChecks
+            maxConcurrentChecksPerContext: Self.maxConcurrentRepositoryChecksPerContext
         ) { path, context in
-            guard let result = try? await GitProcessRunner.runGit(
-                repoPath: path,
-                arguments: ["rev-parse", "--is-inside-work-tree"],
-                context: context
-            )
-            else {
-                return false
-            }
-            return result.status == 0 &&
-                result.stdout.trimmingCharacters(in: .whitespacesAndNewlines) == "true"
+            await GitWorktreeService.probeGitRepository(path: path, context: context)
         }
     }
 
     func isGitRepository(_ path: String, context: WorkspaceContext = .local) async -> Bool {
         await repositoryCheckCoordinator.isGitRepository(path, context: context)
+    }
+
+    private static func probeGitRepository(path: String, context: WorkspaceContext) async -> Bool {
+        guard case .local = context else {
+            return await runRepositoryProbe(path: path, context: context)
+        }
+        return await withTaskGroup(of: Bool.self, returning: Bool.self) { group in
+            group.addTask { await runRepositoryProbe(path: path, context: .local) }
+            group.addTask {
+                try? await Task.sleep(for: localRepositoryCheckTimeout)
+                return false
+            }
+            let result = await group.next() ?? false
+            group.cancelAll()
+            return result
+        }
+    }
+
+    private static func runRepositoryProbe(path: String, context: WorkspaceContext) async -> Bool {
+        guard let result = try? await GitProcessRunner.runGit(
+            repoPath: path,
+            arguments: ["rev-parse", "--is-inside-work-tree"],
+            context: context
+        )
+        else {
+            return false
+        }
+        return result.status == 0 &&
+            result.stdout.trimmingCharacters(in: .whitespacesAndNewlines) == "true"
     }
 
     func hasUncommittedChanges(worktreePath: String, context: WorkspaceContext = .local) async -> Bool {

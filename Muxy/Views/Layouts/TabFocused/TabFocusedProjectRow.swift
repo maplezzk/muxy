@@ -484,7 +484,9 @@ struct TabFocusedProjectRow: View {
             isCheckingGitRepo = false
             return
         }
-        isGitRepo = await GitWorktreeService.shared.isGitRepository(project.path, context: context)
+        let result = await GitWorktreeService.shared.isGitRepository(project.path, context: context)
+        guard !Task.isCancelled else { return }
+        isGitRepo = result
         isCheckingGitRepo = false
         GitRepoStatusCache.shared.update(path: project.path, context: context, isGitRepo: isGitRepo)
     }
