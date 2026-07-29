@@ -1,18 +1,31 @@
 import AppKit
 import SwiftUI
 
+@MainActor
 enum ProjectListSearch {
-    static func filter(_ projects: [Project], matching query: String) -> [Project] {
-        projects.filter { matches($0, query: query) }
+    static func filter(
+        _ projects: [Project],
+        matching query: String,
+        localization: LocalizationService = .shared
+    ) -> [Project] {
+        projects.filter { matches($0, query: query, localization: localization) }
     }
 
     static func activeQuery(_ query: String, isVisible: Bool, isWide: Bool) -> String {
         isVisible && isWide ? query : ""
     }
 
-    static func matches(_ project: Project, query: String) -> Bool {
-        let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        return query.isEmpty || project.name.localizedCaseInsensitiveContains(query)
+    static func matches(
+        _ project: Project,
+        query: String,
+        localization: LocalizationService = .shared
+    ) -> Bool {
+        LocalizedSearch.matches(
+            query: query,
+            localizedKeys: project.isHome ? [Project.homeName] : [],
+            verbatimValues: [project.name],
+            localization: localization
+        )
     }
 }
 
@@ -111,23 +124,23 @@ struct ProjectFocusedSidebar: View {
             ))
             .opacity(isHidden ? 0 : 1)
             .accessibilityElement(children: .contain)
-            .accessibilityLabel("Sidebar")
+            .accessibilityLabel(L10n.string("Sidebar"))
             .alert(
-                "Remove \"\(projectPendingRemoval?.name ?? "")\"?",
+                L10n.string("Remove \"\(projectPendingRemoval?.name ?? "")\"?"),
                 isPresented: removalAlertBinding,
                 presenting: projectPendingRemoval
             ) { project in
-                Button("Remove", role: .destructive) {
+                Button(L10n.string("Remove"), role: .destructive) {
                     performRemove(project)
                     projectPendingRemoval = nil
                 }
                 .keyboardShortcut(.defaultAction)
-                Button("Cancel", role: .cancel) {
+                Button(L10n.string("Cancel"), role: .cancel) {
                     projectPendingRemoval = nil
                 }
                 .keyboardShortcut(.cancelAction)
             } message: { _ in
-                Text("This will remove the project from Muxy. Project files on disk will not be deleted.")
+                Text(L10n.resource("This will remove the project from Muxy. Project files on disk will not be deleted."))
             }
     }
 
@@ -145,17 +158,17 @@ struct ProjectFocusedSidebar: View {
     @ViewBuilder private var addButton: some View {
         if projectGroupStore.isRemoteWorkspaceActive {
             AddProjectButton(expanded: isWide, action: openLocalProjectPicker)
-                .help(shortcutTooltip("Add Project", for: .openProject))
+                .help(shortcutTooltip(L10n.string("Add Project"), for: .openProject))
         } else {
             Menu {
                 Button {
                     openLocalProjectPicker()
                 } label: {
-                    Label("Local", systemImage: "folder")
+                    Label(L10n.string("Local"), systemImage: "folder")
                 }
                 if !projectStore.recentlyRemovedProjects.isEmpty {
                     Divider()
-                    Section("Recently Removed") {
+                    Section(L10n.string("Recently Removed")) {
                         ForEach(projectStore.recentlyRemovedProjects) { entry in
                             Button {
                                 restoreRecentlyRemovedProject(id: entry.id)
@@ -173,46 +186,48 @@ struct ProjectFocusedSidebar: View {
             .menuStyle(.button)
             .menuIndicator(.hidden)
             .buttonStyle(.plain)
-            .help(shortcutTooltip("Add Project", for: .openProject))
+            .help(shortcutTooltip(L10n.string("Add Project"), for: .openProject))
         }
     }
 
     private var sortMenu: some View {
         Menu {
-            Picker("Sort Projects By", selection: $sortModeRaw) {
+            Picker(L10n.string("Sort Projects By"), selection: $sortModeRaw) {
                 ForEach(ProjectSortMode.allCases) { mode in
-                    Label(mode.title, systemImage: mode.systemImage).tag(mode.rawValue)
+                    Label(L10n.string(key: mode.title), systemImage: mode.systemImage).tag(mode.rawValue)
                 }
             }
             .pickerStyle(.inline)
         } label: {
             SidebarHeaderIconButtonLabel(
                 systemName: "arrow.up.arrow.down",
-                accessibilityLabel: "Sort Projects"
+                accessibilityLabel: L10n.string("Sort Projects")
             )
         }
         .menuStyle(.button)
         .menuIndicator(.hidden)
         .buttonStyle(.plain)
-        .help("Sort Projects: \(sortMode.title)")
+        .help(L10n.string("Sort Projects: \(L10n.string(key: sortMode.title))"))
     }
 
     private var projectSearchToggle: some View {
         Button(action: toggleProjectSearch) {
             SidebarHeaderIconButtonLabel(
                 systemName: isProjectSearchVisible ? "xmark" : "magnifyingglass",
-                accessibilityLabel: isProjectSearchVisible ? "Close Project Search" : "Search Projects"
+                accessibilityLabel: isProjectSearchVisible
+                    ? L10n.string("Close Project Search")
+                    : L10n.string("Search Projects")
             )
         }
         .buttonStyle(.plain)
-        .help(isProjectSearchVisible ? "Close Project Search" : "Search Projects")
+        .help(isProjectSearchVisible ? L10n.string("Close Project Search") : L10n.string("Search Projects"))
     }
 
     private var remoteProjectMenu: some View {
         Menu {
             let devices = remoteDeviceStore.sshDevices()
             if devices.isEmpty {
-                Button("No devices") {}
+                Button(L10n.string("No devices")) {}
                     .disabled(true)
             } else {
                 ForEach(devices) { device in
@@ -232,10 +247,10 @@ struct ProjectFocusedSidebar: View {
                 SettingsFocusCoordinator.shared.request(.remoteDevices)
                 NotificationCenter.default.post(name: .openSettingsModal, object: nil)
             } label: {
-                Label("Manage Remote Devices", systemImage: "server.rack")
+                Label(L10n.string("Manage Remote Devices"), systemImage: "server.rack")
             }
         } label: {
-            Label("Remote", systemImage: "network")
+            Label(L10n.string("Remote"), systemImage: "network")
         }
     }
 
@@ -258,7 +273,7 @@ struct ProjectFocusedSidebar: View {
                 projectGroupStore: projectGroupStore
             )
         } catch {
-            ToastState.shared.show(title: "Could not restore project", body: error.localizedDescription)
+            ToastState.shared.show(title: L10n.string("Could not restore project"), body: error.localizedDescription)
         }
     }
 
@@ -358,13 +373,13 @@ struct ProjectFocusedSidebar: View {
                 .foregroundStyle(MuxyTheme.fgMuted)
                 .accessibilityHidden(true)
 
-            TextField("Search projects", text: $projectSearchText)
+            TextField(L10n.string("Search projects"), text: $projectSearchText)
                 .textFieldStyle(.plain)
                 .font(.system(size: UIMetrics.fontCaption, weight: .semibold))
                 .foregroundStyle(MuxyTheme.fg)
                 .focused($isProjectSearchFocused)
                 .onExitCommand(perform: hideProjectSearch)
-                .accessibilityLabel("Search projects")
+                .accessibilityLabel(L10n.string("Search projects"))
         }
         .padding(.horizontal, UIMetrics.spacing4)
         .frame(height: UIMetrics.controlMedium)
@@ -394,13 +409,13 @@ struct ProjectFocusedSidebar: View {
     private var scrollableProjects: some View {
         let shortcutIndices = ProjectNavigationOrder.shortcutIndices(in: navigableProjects)
         return ScrollView(.vertical, showsIndicators: false) {
-            LazyVStack(spacing: UIMetrics.spacing3) {
+            VStack(spacing: UIMetrics.spacing3) {
                 if let filteredHomeProject {
                     projectRow(for: filteredHomeProject, shortcutIndex: shortcutIndices[filteredHomeProject.id])
                 }
 
                 if hasNoSearchResults {
-                    Text("No projects match your search.")
+                    Text(L10n.resource("No projects match your search."))
                         .font(.system(size: UIMetrics.fontBody))
                         .foregroundStyle(MuxyTheme.fgMuted)
                         .frame(maxWidth: .infinity)
@@ -507,7 +522,7 @@ struct ProjectFocusedSidebar: View {
     }
 
     private func shortcutTooltip(_ name: String, for action: ShortcutAction) -> String {
-        "\(name) (\(KeyBindingStore.shared.combo(for: action).displayString))"
+        L10n.string("\(name) (\(KeyBindingStore.shared.combo(for: action).displayString))")
     }
 
     private func projectDragGesture(for project: Project) -> some Gesture {
@@ -574,11 +589,11 @@ struct ProjectFocusedSidebar: View {
 
     private func presentProjectRemovalFailure(project: Project, error: Error) {
         let alert = NSAlert()
-        alert.messageText = "Could not remove project \"\(project.name)\""
+        alert.messageText = L10n.string("Could not remove project \"\(project.name)\"")
         alert.informativeText = error.localizedDescription
         alert.alertStyle = .warning
         alert.icon = NSApp.applicationIconImage
-        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: L10n.string("OK"))
         alert.runModal()
     }
 
@@ -656,7 +671,7 @@ private struct AddProjectButton: View {
             Label(expanded: expanded)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Add Project")
+        .accessibilityLabel(L10n.string("Add Project"))
     }
 
     struct Label: View {
@@ -672,7 +687,7 @@ private struct AddProjectButton: View {
                 }
             }
             .onHover { hovered = $0 }
-            .accessibilityLabel("Add Project")
+            .accessibilityLabel(L10n.string("Add Project"))
         }
 
         private var collapsedLayout: some View {
@@ -698,7 +713,7 @@ private struct AddProjectButton: View {
                 }
                 .frame(width: UIMetrics.iconXXL, height: UIMetrics.iconXXL)
 
-                Text("Add Project")
+                Text(L10n.resource("Add Project"))
                     .font(.system(size: UIMetrics.fontBody, weight: .medium))
                     .foregroundStyle(hovered ? MuxyTheme.accent : MuxyTheme.fgMuted)
                     .lineLimit(1)
@@ -707,24 +722,5 @@ private struct AddProjectButton: View {
             .padding(UIMetrics.spacing2)
             .background(hovered ? MuxyTheme.hover : Color.clear, in: RoundedRectangle(cornerRadius: UIMetrics.radiusLG))
         }
-    }
-}
-
-private struct SidebarHeaderIconButtonLabel: View {
-    let systemName: String
-    let accessibilityLabel: String
-    @State private var hovered = false
-
-    var body: some View {
-        Image(systemName: systemName)
-            .font(.system(size: UIMetrics.fontCaption, weight: .semibold))
-            .foregroundStyle(hovered ? MuxyTheme.accent : MuxyTheme.fgMuted)
-            .frame(width: UIMetrics.controlMedium, height: UIMetrics.controlMedium)
-            .background(
-                hovered ? MuxyTheme.hover : MuxyTheme.surface,
-                in: RoundedRectangle(cornerRadius: UIMetrics.radiusMD)
-            )
-            .onHover { hovered = $0 }
-            .accessibilityLabel(accessibilityLabel)
     }
 }

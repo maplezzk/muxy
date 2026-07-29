@@ -118,9 +118,11 @@ final class GhosttyTerminalNSView: NSView,
         installScrollbarOverlay()
         registerForDraggedTypes([.fileURL, .string])
         setAccessibilityRole(.textArea)
-        setAccessibilityRoleDescription("Terminal")
+        setAccessibilityRoleDescription(L10n.string("Terminal"))
         let directoryName = URL(fileURLWithPath: workingDirectory).lastPathComponent
-        let label = directoryName.isEmpty ? "Terminal" : "Terminal — \(directoryName)"
+        let label = directoryName.isEmpty
+            ? L10n.string("Terminal")
+            : L10n.string("Terminal — \(directoryName)")
         setAccessibilityLabel(label)
     }
 
@@ -1030,7 +1032,7 @@ final class GhosttyTerminalNSView: NSView,
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(selection, forType: .string)
-        ToastState.shared.show("Copied")
+        ToastState.shared.show(L10n.string("Copied"))
     }
 
     override func mouseDragged(with event: NSEvent) {
@@ -1390,9 +1392,9 @@ final class GhosttyTerminalNSView: NSView,
     }
 
     private func presentContextMenu(with event: NSEvent) {
-        let menu = NSMenu(title: "Terminal")
+        let menu = NSMenu(title: L10n.string("Terminal"))
 
-        let paste = ClosureMenuItem(title: "Paste") { [weak self] in
+        let paste = ClosureMenuItem(title: L10n.string("Paste")) { [weak self] in
             self?.performContextPaste()
         }
         paste.isEnabled = NSPasteboard.general.string(forType: .string).map { !$0.isEmpty } ?? pasteboardHasImage()
@@ -1400,10 +1402,10 @@ final class GhosttyTerminalNSView: NSView,
 
         menu.addItem(.separator())
 
-        menu.addItem(contextSplitMenuItem(title: "Split Right", direction: .horizontal, position: .second))
-        menu.addItem(contextSplitMenuItem(title: "Split Left", direction: .horizontal, position: .first))
-        menu.addItem(contextSplitMenuItem(title: "Split Down", direction: .vertical, position: .second))
-        menu.addItem(contextSplitMenuItem(title: "Split Up", direction: .vertical, position: .first))
+        menu.addItem(contextSplitMenuItem(title: L10n.string("Split Right"), direction: .horizontal, position: .second))
+        menu.addItem(contextSplitMenuItem(title: L10n.string("Split Left"), direction: .horizontal, position: .first))
+        menu.addItem(contextSplitMenuItem(title: L10n.string("Split Down"), direction: .vertical, position: .second))
+        menu.addItem(contextSplitMenuItem(title: L10n.string("Split Up"), direction: .vertical, position: .first))
 
         menu.addItem(.separator())
 
@@ -1946,7 +1948,7 @@ final class GhosttyTerminalNSView: NSView,
         } catch {
             guard !Task.isCancelled else { return false }
             ToastState.shared.show(
-                title: "Could not paste image on remote device",
+                title: L10n.string("Could not paste image on remote device"),
                 body: error.localizedDescription
             )
             return false
