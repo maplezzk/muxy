@@ -83,8 +83,9 @@ struct ProjectGroupStoreTests {
         let store = makeStore(persistence: persistence)
         let projectID = UUID()
 
-        store.addProject(projectID: projectID, toGroup: group.id)
+        let added = store.addProject(projectID: projectID, toGroup: group.id)
 
+        #expect(added == true)
         #expect(store.groups.first?.projectIDs == [projectID])
         #expect(persistence.savedGroups?.first?.projectIDs == [projectID])
     }
@@ -95,8 +96,9 @@ struct ProjectGroupStoreTests {
         let persistence = ProjectGroupPersistenceStub(initial: [group])
         let store = makeStore(persistence: persistence)
 
-        store.addProject(projectID: Project.homeID, toGroup: group.id)
+        let added = store.addProject(projectID: Project.homeID, toGroup: group.id)
 
+        #expect(added == false)
         #expect(store.groups.first?.projectIDs.isEmpty == true)
     }
 
@@ -118,8 +120,9 @@ struct ProjectGroupStoreTests {
         let persistence = ProjectGroupPersistenceStub(initial: [group])
         let store = makeStore(persistence: persistence)
 
-        store.addProject(projectID: UUID(), toGroup: group.id)
+        let added = store.addProject(projectID: UUID(), toGroup: group.id)
 
+        #expect(added == false)
         #expect(store.groups.first?.projectIDs.isEmpty == true)
         #expect(persistence.savedGroups == nil)
     }
@@ -304,6 +307,7 @@ struct ProjectGroupStoreTests {
         let store = makeStore(persistence: ProjectGroupPersistenceStub(initial: []))
 
         #expect(store.workspaceContext(for: Project(name: "A", path: "/a")) == .local)
+        #expect(store.resolvedWorkspaceContext(for: Project(name: "A", path: "/a")) == .local)
     }
 
     @Test("workspaceContext resolves a remote project to its device's SSH context")
@@ -314,6 +318,7 @@ struct ProjectGroupStoreTests {
         let project = Project(name: "api", path: "~/code/api", remoteWorkspaceID: group.id)
 
         #expect(store.workspaceContext(for: project) == .ssh(device.destination))
+        #expect(store.resolvedWorkspaceContext(for: project) == .ssh(device.destination))
     }
 
     @Test("workspaceContext falls back to local when the device is missing")
@@ -323,6 +328,7 @@ struct ProjectGroupStoreTests {
         let project = Project(name: "api", path: "~/code/api", remoteWorkspaceID: group.id)
 
         #expect(store.workspaceContext(for: project) == .local)
+        #expect(store.resolvedWorkspaceContext(for: project) == nil)
     }
 
     @Test("workspaceContext falls back to local when the remote workspace is missing")
@@ -331,6 +337,7 @@ struct ProjectGroupStoreTests {
         let project = Project(name: "api", path: "~/code/api", remoteWorkspaceID: UUID())
 
         #expect(store.workspaceContext(for: project) == .local)
+        #expect(store.resolvedWorkspaceContext(for: project) == nil)
     }
 
     @Test("addRemoteWorkspace appends an SSH group referencing the device and persists")
@@ -603,33 +610,5 @@ struct ProjectGroupStoreTests {
         #expect(project.worktreesEnabled == true)
         #expect(project.remoteWorkspaceID == workspaceID)
         #expect(project.sortOrder == 3)
-    }
-}
-
-final class ProjectGroupPersistenceStub: ProjectGroupPersisting {
-    var groups: [ProjectGroup]
-    var savedGroups: [ProjectGroup]?
-    var storedActiveGroupID: UUID?
-
-    init(initial: [ProjectGroup] = [], storedActiveGroupID: UUID? = nil) {
-        groups = initial
-        self.storedActiveGroupID = storedActiveGroupID
-    }
-
-    func loadProjectGroups() throws -> [ProjectGroup] {
-        groups
-    }
-
-    func saveProjectGroups(_ groups: [ProjectGroup]) throws {
-        savedGroups = groups
-        self.groups = groups
-    }
-
-    func loadActiveGroupID() -> UUID? {
-        storedActiveGroupID
-    }
-
-    func saveActiveGroupID(_ id: UUID?) {
-        storedActiveGroupID = id
     }
 }

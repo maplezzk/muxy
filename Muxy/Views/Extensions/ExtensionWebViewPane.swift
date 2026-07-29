@@ -26,7 +26,7 @@ struct ExtensionWebViewPane: View {
                 worktreeStore: worktreeStore,
                 projectGroupStore: projectGroupStore,
                 focused: focused,
-                onFocus: onFocus
+                surfaceStore: state.surfaceStore
             )
             .contentShape(Rectangle())
             .onTapGesture { onFocus() }
@@ -42,9 +42,9 @@ struct ExtensionWebViewPane: View {
         VStack(spacing: 8) {
             Image(systemName: "puzzlepiece.extension")
                 .font(.system(size: 32, weight: .light))
-            Text("Extension \(state.extensionID) is not loaded")
+            Text(L10n.resource("Extension \(state.extensionID) is not loaded"))
                 .font(.headline)
-            Text("Tab type: \(state.tabTypeID)")
+            Text(L10n.resource("Tab type: \(state.tabTypeID)"))
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }

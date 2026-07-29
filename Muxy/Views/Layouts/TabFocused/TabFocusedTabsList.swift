@@ -10,17 +10,21 @@ struct TabFocusedTabActions: View {
     @Environment(BrowserProfileStore.self) private var browserProfileStore
     @AppStorage(BrowserPreferences.enabledKey) private var browserEnabled = true
 
+    private var targetKey: WorktreeKey? {
+        worktree.map { WorktreeKey(projectID: project.id, worktreeID: $0.id) }
+    }
+
     var body: some View {
-        SidebarActionButton(symbol: "plus", label: "New Terminal Tab") {
-            activateTarget()
-            appState.createTab(projectID: project.id)
+        SidebarActionButton(symbol: "plus", label: L10n.string("New Terminal Tab")) {
+            guard let targetKey = activatedTargetKey() else { return }
+            appState.dispatch(.createTabInWorktree(key: targetKey, areaID: nil))
         }
         if browserEnabled {
-            SidebarActionButton(symbol: "globe", label: "New Browser Tab") {
-                activateTarget()
-                appState.dispatch(.createBrowserTab(
-                    projectID: project.id,
-                    areaID: appState.focusedArea(for: project.id)?.id,
+            SidebarActionButton(symbol: "globe", label: L10n.string("New Browser Tab")) {
+                guard let targetKey = activatedTargetKey() else { return }
+                appState.dispatch(.createBrowserTabInWorktree(
+                    key: targetKey,
+                    areaID: nil,
                     url: BrowserURL.homeURL,
                     profileID: browserProfileStore.defaultProfileID
                 ))
@@ -28,16 +32,150 @@ struct TabFocusedTabActions: View {
         }
     }
 
-    private func activateTarget() {
-        if appState.activeProjectID != project.id {
-            worktreeStore.ensurePrimary(for: project)
-            if let preferred = worktreeStore.preferred(for: project.id, matching: appState.activeWorktreeID[project.id]) {
-                appState.selectProject(project, worktree: worktree ?? preferred)
+    private func activatedTargetKey() -> WorktreeKey? {
+        guard let targetKey else { return nil }
+        TabFocusedSidebarTarget.activate(
+            project: project,
+            worktree: worktree,
+            appState: appState,
+            worktreeStore: worktreeStore
+        )
+        return targetKey
+    }
+}
+
+struct AgentsFocusedTabActions: View {
+    let project: Project
+    let worktree: Worktree?
+    @Binding var showingProviders: Bool
+
+    @Environment(AppState.self) private var appState
+    @Environment(ProjectGroupStore.self) private var projectGroupStore
+    @Environment(WorktreeStore.self) private var worktreeStore
+    @State private var hovered = false
+    @State private var options: [AgentTabLaunchOption] = []
+    @State private var loadingProviders = false
+    @State private var providerTask: Task<Void, Never>?
+
+    private var workspaceContext: WorkspaceContext {
+        projectGroupStore.workspaceContext(for: project)
+    }
+
+    var body: some View {
+        Button {
+            presentProviders()
+        } label: {
+            Image(systemName: "plus")
+                .font(.system(size: UIMetrics.fontBody, weight: .semibold))
+                .foregroundStyle(hovered ? MuxyTheme.fg : MuxyTheme.fgMuted)
+                .frame(width: TabFocusedSidebarMetrics.controlSlot, height: TabFocusedSidebarMetrics.controlSlot)
+                .background {
+                    RoundedRectangle(cornerRadius: UIMetrics.radiusSM, style: .continuous)
+                        .fill(hovered || showingProviders ? MuxyTheme.hover : Color.clear)
+                }
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+        .popover(isPresented: $showingProviders, arrowEdge: .trailing) {
+            if loadingProviders {
+                AgentsFocusedProviderLoadingMenu()
+            } else {
+                AgentsFocusedProviderMenu(options: options) { option in
+                    showingProviders = false
+                    launch(option)
+                }
             }
         }
-        if let worktree, appState.activeWorktreeID[project.id] != worktree.id {
-            appState.selectWorktree(projectID: project.id, worktree: worktree)
+        .onChange(of: showingProviders) { _, showing in
+            guard !showing else { return }
+            providerTask?.cancel()
+            loadingProviders = false
         }
+        .onDisappear { providerTask?.cancel() }
+        .help(L10n.string("New Agent Tab"))
+        .accessibilityLabel(L10n.string("New Agent Tab"))
+    }
+
+    private func presentProviders() {
+        providerTask?.cancel()
+        guard case let .ssh(destination) = workspaceContext else {
+            options = AgentTabLaunchOption.resolveLocal()
+            loadingProviders = false
+            showingProviders = true
+            return
+        }
+
+        options = []
+        loadingProviders = true
+        showingProviders = true
+        providerTask = Task {
+            do {
+                let resolved = try await AgentTabLaunchOption.resolveRemote(destination: destination)
+                guard !Task.isCancelled else { return }
+                options = resolved
+                loadingProviders = false
+            } catch {
+                guard !Task.isCancelled else { return }
+                loadingProviders = false
+                showingProviders = false
+                ToastState.shared.show(
+                    title: L10n.string("Could not check remote agent providers"),
+                    body: error.localizedDescription
+                )
+            }
+        }
+    }
+
+    private func launch(_ option: AgentTabLaunchOption) {
+        guard let command = option.command else { return }
+        AgentsFocusedTabLauncher.launch(
+            request: AgentsFocusedTabLaunchRequest(
+                project: project,
+                worktree: worktree,
+                providerID: option.provider.id,
+                name: option.provider.displayName,
+                command: command
+            ),
+            appState: appState,
+            worktreeStore: worktreeStore
+        )
+    }
+}
+
+struct AgentsFocusedTabLaunchRequest {
+    let project: Project
+    let worktree: Worktree?
+    let providerID: String
+    let name: String
+    let command: String
+}
+
+@MainActor
+enum AgentsFocusedTabLauncher {
+    static func launch(
+        request: AgentsFocusedTabLaunchRequest,
+        appState: AppState,
+        worktreeStore: WorktreeStore
+    ) {
+        TabFocusedSidebarTarget.activate(
+            project: request.project,
+            worktree: request.worktree,
+            appState: appState,
+            worktreeStore: worktreeStore
+        )
+        let effects = appState.dispatchReturningEffects(.createCommandTab(CommandTabRequest(
+            projectID: request.project.id,
+            areaID: nil,
+            name: request.name,
+            command: request.command,
+            closesOnCommandExit: false
+        )))
+        guard let tabID = effects.createdTabID,
+              let key = appState.activeWorktreeKey(for: request.project.id),
+              let paneID = appState.workspaceRoots[key]?.locateTab(id: tabID)?.tab.content.pane?.id
+        else { return }
+        DetectedAgentStore.shared.setProvisionalAgent(request.providerID, for: paneID)
     }
 }
 
@@ -52,6 +190,7 @@ struct TabFocusedTabsList: View {
     private struct AreaTab: Identifiable {
         let area: TabArea
         let tab: TerminalTab
+        let relatedTabs: [TerminalTab]
         let worktree: Worktree
         var id: UUID { tab.id }
     }
@@ -61,8 +200,14 @@ struct TabFocusedTabsList: View {
     }
 
     private var areaTabs: [AreaTab] {
-        appState.areas(for: worktreeKey).flatMap { area in
-            area.tabs.map { AreaTab(area: area, tab: $0, worktree: worktree) }
+        let allTabs = appState.workspaceRoots[worktreeKey]?.allTabs() ?? []
+        return appState.topLevelTabs(for: worktreeKey).map { item in
+            AreaTab(
+                area: item.area,
+                tab: item.tab,
+                relatedTabs: [item.tab] + allTabs.filter { $0.parentTabID == item.tab.id },
+                worktree: worktree
+            )
         }
     }
 
@@ -70,7 +215,7 @@ struct TabFocusedTabsList: View {
         guard appState.activeProjectID == project.id,
               appState.activeWorktreeID[project.id] == worktree.id
         else { return nil }
-        return appState.activeTab(for: project.id)?.id
+        return appState.activeTopLevelTabID(for: worktreeKey)
     }
 
     var body: some View {
@@ -90,6 +235,8 @@ struct TabFocusedTabsList: View {
                 project: project,
                 area: item.area,
                 tab: item.tab,
+                relatedTabs: item.relatedTabs,
+                topLevelTabs: areaTabs.map { ($0.area, $0.tab) },
                 active: item.tab.id == activeTabID,
                 worktree: item.worktree,
                 shortcutNumber: numbers[item.tab.id]
@@ -122,7 +269,7 @@ struct TabFocusedTabsList: View {
             dragState.draggedID = item.tab.id
             dragState.lastReorderTargetID = nil
         }
-        reorderIfNeeded(area: item.area, at: location)
+        reorderIfNeeded(at: location)
     }
 
     private func handleDragEnded() {
@@ -133,7 +280,7 @@ struct TabFocusedTabsList: View {
         }
     }
 
-    private func reorderIfNeeded(area: TabArea, at location: CGPoint) {
+    private func reorderIfNeeded(at location: CGPoint) {
         guard let draggedID = dragState.draggedID else { return }
         var hoveredTargetID: UUID?
 
@@ -141,16 +288,19 @@ struct TabFocusedTabsList: View {
             guard frame.contains(location) else { continue }
             hoveredTargetID = id
             guard dragState.lastReorderTargetID != id,
-                  let sourceIndex = area.tabs.firstIndex(where: { $0.id == draggedID }),
-                  let destIndex = area.tabs.firstIndex(where: { $0.id == id })
+                  let sourceIndex = areaTabs.firstIndex(where: { $0.tab.id == draggedID }),
+                  let destIndex = areaTabs.firstIndex(where: { $0.tab.id == id })
             else { return }
 
             dragState.lastReorderTargetID = id
             let offset = destIndex > sourceIndex ? destIndex + 1 : destIndex
             withAnimation(.easeInOut(duration: 0.15)) {
-                area.reorderTab(fromOffsets: IndexSet(integer: sourceIndex), toOffset: offset)
+                appState.reorderTopLevelTabs(
+                    for: worktreeKey,
+                    fromOffsets: IndexSet(integer: sourceIndex),
+                    toOffset: offset
+                )
             }
-            appState.saveWorkspaces()
             return
         }
 
@@ -177,10 +327,12 @@ private struct TabFocusedRowFramePreferenceKey: PreferenceKey {
     }
 }
 
-private struct TabFocusedTabRow: View {
+struct TabFocusedTabRow: View {
     let project: Project
     let area: TabArea
     let tab: TerminalTab
+    let relatedTabs: [TerminalTab]
+    let topLevelTabs: [(area: TabArea, tab: TerminalTab)]
     let active: Bool
     var worktree: Worktree?
     var shortcutNumber: Int?
@@ -202,8 +354,9 @@ private struct TabFocusedTabRow: View {
     @State private var notificationStore = NotificationStore.shared
 
     private var paneProgress: TerminalProgress? {
-        guard let paneID = tab.content.pane?.id else { return nil }
-        return progressStore.progress(for: paneID)
+        relatedTabs.compactMap { $0.content.pane?.id }
+            .compactMap { progressStore.progress(for: $0) }
+            .first
     }
 
     private var tabProgress: TerminalProgress? {
@@ -211,21 +364,26 @@ private struct TabFocusedTabRow: View {
     }
 
     private var hasCompletionPending: Bool {
-        guard let paneID = tab.content.pane?.id else { return false }
-        return progressStore.isCompletionPending(for: paneID)
-            || AgentStatusStore.shared.isCompletionPending(forPane: paneID)
+        relatedTabs.compactMap { $0.content.pane?.id }.contains {
+            progressStore.isCompletionPending(for: $0)
+                || AgentStatusStore.shared.isCompletionPending(forPane: $0)
+        }
     }
 
     private var hasUnread: Bool {
-        notificationStore.hasUnread(tabID: tab.id)
+        relatedTabs.contains { notificationStore.hasUnread(tabID: $0.id) }
     }
 
     private var isIdle: Bool {
-        tab.content.pane?.isOffline ?? false
+        let panes = relatedTabs.compactMap(\.content.pane)
+        return !panes.isEmpty && panes.allSatisfy(\.isOffline)
     }
 
     private var agentStatus: AgentStatus? {
-        AgentStatusStore.shared.status(forPane: tab.content.pane?.id)
+        let statuses = relatedTabs.compactMap { tab in
+            AgentStatusStore.shared.status(forPane: tab.content.pane?.id)
+        }
+        return statuses.contains(.waiting) ? .waiting : statuses.first
     }
 
     private var statusDotColor: Color? {
@@ -266,25 +424,29 @@ private struct TabFocusedTabRow: View {
     }
 
     private var currentIndex: Int? {
-        area.tabs.firstIndex(where: { $0.id == tab.id })
+        topLevelTabs.firstIndex(where: { $0.tab.id == tab.id })
     }
 
     private var closableOthersCount: Int {
-        area.tabs.count(where: { $0.id != tab.id && !$0.isPinned })
+        topLevelTabs.count(where: { $0.tab.id != tab.id && !$0.tab.isPinned })
     }
 
     private var closableLeftCount: Int {
         guard let currentIndex else { return 0 }
-        return area.tabs.prefix(currentIndex).count(where: { !$0.isPinned })
+        return topLevelTabs.prefix(currentIndex).count(where: { !$0.tab.isPinned })
     }
 
     private var closableRightCount: Int {
         guard let currentIndex else { return 0 }
-        return area.tabs.suffix(from: currentIndex + 1).count(where: { !$0.isPinned })
+        return topLevelTabs.suffix(from: currentIndex + 1).count(where: { !$0.tab.isPinned })
     }
 
     private var hasClosableSiblings: Bool {
         closableOthersCount > 0 || closableLeftCount > 0 || closableRightCount > 0
+    }
+
+    private var isTopLevel: Bool {
+        tab.parentTabID == nil
     }
 
     private var closeButtonVisible: Bool {
@@ -312,7 +474,7 @@ private struct TabFocusedTabRow: View {
                         }
                     }
             } else {
-                Text(tab.title)
+                Text(tab.localizedTitle)
                     .font(.system(size: UIMetrics.fontHeadline))
                     .foregroundStyle(active ? MuxyTheme.fg : MuxyTheme.fgMuted)
                     .lineLimit(1)
@@ -367,7 +529,7 @@ private struct TabFocusedTabRow: View {
                 .accessibilityHidden(true)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(tab.title)
+        .accessibilityLabel(tab.localizedTitle)
         .accessibilityAddTraits(active ? [.isButton, .isSelected] : .isButton)
         .contextMenu { contextMenu }
         .popover(isPresented: $showColorPicker, arrowEdge: .trailing) {
@@ -385,40 +547,60 @@ private struct TabFocusedTabRow: View {
 
     @ViewBuilder
     private var contextMenu: some View {
-        Button("New Tab to the Left") {
-            appState.dispatch(.createTabAdjacent(projectID: projectID, areaID: area.id, tabID: tab.id, side: .left))
+        if isTopLevel {
+            Button(L10n.string("New Tab to the Left")) {
+                appState.dispatch(
+                    .createTabAdjacent(projectID: projectID, areaID: area.id, tabID: tab.id, side: .left)
+                )
+            }
+            Button(L10n.string("New Tab to the Right")) {
+                appState.dispatch(
+                    .createTabAdjacent(projectID: projectID, areaID: area.id, tabID: tab.id, side: .right)
+                )
+            }
+            Divider()
         }
-        Button("New Tab to the Right") {
-            appState.dispatch(.createTabAdjacent(projectID: projectID, areaID: area.id, tabID: tab.id, side: .right))
-        }
-        Divider()
-        Button("Rename Tab") { startRename() }
+        Button(L10n.string("Rename Tab")) { startRename() }
         if tab.customTitle != nil {
-            Button("Reset Title") {
+            Button(L10n.string("Reset Title")) {
                 area.setCustomTitle(tab.id, title: nil)
                 appState.saveWorkspaces()
             }
         }
-        Button("Set Tab Color…") { showColorPicker = true }
+        Button(L10n.string("Set Tab Color…")) { showColorPicker = true }
         if tab.colorID != nil {
-            Button("Reset Tab Color") {
+            Button(L10n.string("Reset Tab Color")) {
                 area.setColorID(tab.id, colorID: nil)
                 appState.saveWorkspaces()
             }
         }
-        Divider()
-        Button(tab.isPinned ? "Unpin Tab" : "Pin Tab") { area.togglePin(tab.id) }
-        if !tab.isPinned || hasClosableSiblings {
+        if isTopLevel {
+            Divider()
+            Button(
+                tab.isPinned
+                    ? L10n.string("Unpin Tab")
+                    : L10n.string("Pin Tab")
+            ) {
+                guard let worktree else { return }
+                appState.togglePinTopLevelTab(
+                    tab.id,
+                    for: WorktreeKey(projectID: projectID, worktreeID: worktree.id)
+                )
+            }
+        }
+        if !tab.isPinned || isTopLevel && hasClosableSiblings {
             Divider()
             if !tab.isPinned {
-                Button("Close Tab") { close() }
+                Button(L10n.string("Close Tab")) { close() }
             }
-            Button("Close Other Tabs") { closeOthers() }
-                .disabled(closableOthersCount == 0)
-            Button("Close Tabs to the Left") { closeLeft() }
-                .disabled(closableLeftCount == 0)
-            Button("Close Tabs to the Right") { closeRight() }
-                .disabled(closableRightCount == 0)
+            if isTopLevel {
+                Button(L10n.string("Close Other Tabs")) { closeOthers() }
+                    .disabled(closableOthersCount == 0)
+                Button(L10n.string("Close Tabs to the Left")) { closeLeft() }
+                    .disabled(closableLeftCount == 0)
+                Button(L10n.string("Close Tabs to the Right")) { closeRight() }
+                    .disabled(closableRightCount == 0)
+            }
         }
     }
 
@@ -436,7 +618,7 @@ private struct TabFocusedTabRow: View {
                 .frame(width: UIMetrics.iconMD, height: UIMetrics.iconMD)
                 .contentShape(Rectangle())
                 .onTapGesture { close() }
-                .accessibilityLabel("Close Tab")
+                .accessibilityLabel(L10n.string("Close Tab"))
                 .accessibilityAddTraits(.isButton)
         } else {
             statusAccessory
@@ -467,7 +649,7 @@ private struct TabFocusedTabRow: View {
                 .font(.system(size: UIMetrics.fontFootnote, weight: .medium))
                 .foregroundStyle(MuxyTheme.fgMuted)
                 .frame(width: UIMetrics.iconMD, height: UIMetrics.iconMD)
-                .help("Idle — terminal freed to save memory. Reopens when selected.")
+                .help(L10n.string("Idle — terminal freed to save memory. Reopens when selected."))
         } else {
             Color.clear
                 .frame(width: UIMetrics.iconMD, height: UIMetrics.iconMD)
@@ -478,7 +660,10 @@ private struct TabFocusedTabRow: View {
     private var leadingIcon: some View {
         switch tab.kind {
         case .terminal:
-            if let agentIconName = DetectedAgentStore.shared.iconName(forPane: tab.content.pane?.id) {
+            let agentIconName = relatedTabs.compactMap {
+                DetectedAgentStore.shared.iconName(forPane: $0.content.pane?.id)
+            }.first
+            if let agentIconName {
                 ProviderIconView(iconName: agentIconName, size: UIMetrics.iconMD)
             } else {
                 Image(systemName: "terminal")
@@ -517,9 +702,11 @@ private struct TabFocusedTabRow: View {
         withAnimation(.easeIn(duration: 0.15)) {
             completionFlashOn = true
         }
-        if active, let paneID = tab.content.pane?.id {
-            progressStore.clearCompletion(for: paneID)
-            AgentStatusStore.shared.clearCompletion(for: paneID)
+        if active {
+            for paneID in relatedTabs.compactMap({ $0.content.pane?.id }) {
+                progressStore.clearCompletion(for: paneID)
+                AgentStatusStore.shared.clearCompletion(for: paneID)
+            }
         }
         flashTask = Task { @MainActor in
             try await Task.sleep(for: .milliseconds(450))
@@ -534,6 +721,7 @@ private struct TabFocusedTabRow: View {
         if let worktree, appState.activeWorktreeID[projectID] != worktree.id {
             appState.selectWorktree(projectID: projectID, worktree: worktree)
         }
+        guard !active else { return }
         appState.dispatch(.selectTab(projectID: projectID, areaID: area.id, tabID: tab.id))
     }
 
@@ -548,37 +736,52 @@ private struct TabFocusedTabRow: View {
         appState.selectProject(project, worktree: target)
     }
 
+    private var tabKey: WorktreeKey {
+        WorktreeKey(projectID: projectID, worktreeID: worktree?.id ?? projectID)
+    }
+
     private func close() {
-        appState.closeTab(tab.id, areaID: area.id, projectID: projectID)
+        appState.closeTab(tab.id, areaID: area.id, key: tabKey)
     }
 
     private func closeOthers() {
-        let ids = area.tabs.filter { $0.id != tab.id && !$0.isPinned }.map(\.id)
-        appState.closeTabs(ids, areaID: area.id, projectID: projectID)
+        for item in topLevelTabs where item.tab.id != tab.id && !item.tab.isPinned {
+            appState.closeTab(item.tab.id, areaID: item.area.id, key: tabKey)
+        }
     }
 
     private func closeLeft() {
         guard let currentIndex else { return }
-        let ids = area.tabs.prefix(currentIndex).filter { !$0.isPinned }.map(\.id)
-        appState.closeTabs(ids, areaID: area.id, projectID: projectID)
+        for item in topLevelTabs.prefix(currentIndex) where !item.tab.isPinned {
+            appState.closeTab(item.tab.id, areaID: item.area.id, key: tabKey)
+        }
     }
 
     private func closeRight() {
         guard let currentIndex else { return }
-        let ids = area.tabs.suffix(from: currentIndex + 1).filter { !$0.isPinned }.map(\.id)
-        appState.closeTabs(ids, areaID: area.id, projectID: projectID)
+        for item in topLevelTabs.suffix(from: currentIndex + 1) where !item.tab.isPinned {
+            appState.closeTab(item.tab.id, areaID: item.area.id, key: tabKey)
+        }
     }
 
     private func startRename() {
-        renameText = tab.title
+        renameText = tab.localizedTitle
         isRenaming = true
         renameFieldFocused = true
     }
 
     private func commitRename() {
-        let trimmed = renameText.trimmingCharacters(in: .whitespaces)
-        area.setCustomTitle(tab.id, title: trimmed.isEmpty ? nil : trimmed)
-        appState.saveWorkspaces()
+        switch TerminalTabRename.resolve(
+            input: renameText,
+            displayedTitle: tab.localizedTitle,
+            existingCustomTitle: tab.customTitle
+        ) {
+        case .unchanged:
+            break
+        case let .update(customTitle):
+            area.setCustomTitle(tab.id, title: customTitle)
+            appState.saveWorkspaces()
+        }
         isRenaming = false
     }
 

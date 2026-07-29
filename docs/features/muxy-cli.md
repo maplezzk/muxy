@@ -63,6 +63,57 @@ muxy switch-project "My App"
 muxy switch-project ~/Developer/my-app
 ```
 
+### Create, attach, and detach projects
+
+Create or open a project, optionally creating its directory and placing it in a workspace:
+
+```bash
+muxy create-project ~/Developer/my-app
+muxy create-project ~/Developer/new-app --create --name "New App" --workspace Work
+```
+
+Options:
+
+- `--create` — create the directory if it does not exist
+- Relative paths and `~` are resolved against your shell's current directory before the request is sent
+- `--name <name>` — rename the project after opening it
+- `--workspace <name|id>` — add the project to a workspace (fails if the workspace does not exist, or is a remote SSH workspace)
+
+On success it prints `ok`, the project ID, name, and path (tab-separated). Opening a project that is already known to
+Muxy does not change its existing worktree preference.
+
+Move a project into a workspace, or remove it from all workspaces:
+
+```bash
+muxy attach-project "My App" --workspace Work
+muxy detach-project "My App"
+```
+
+### Workspaces
+
+List workspaces:
+
+```bash
+muxy list-workspaces
+```
+
+Output is tab-separated:
+
+```text
+<workspace-id>  <name>  <project-count>  <active>
+```
+
+Create, switch, rename, or delete a workspace by name or ID:
+
+```bash
+muxy create-workspace Work
+muxy switch-workspace Work
+muxy rename-workspace Work "Client Work"
+muxy delete-workspace Work
+```
+
+`delete-workspace` fails if the workspace still contains projects — detach or move them first.
+
 ### List and switch worktrees
 
 List worktrees for the active project:
@@ -137,7 +188,7 @@ Pane-control commands talk to the running Muxy app through a local Unix socket. 
 
 ### Create splits
 
-When you run `muxy split-right` or `muxy split-down` from inside a Muxy pane, the split starts from the pane you are in. Muxy exports `MUXY_PANE_ID` into every pane, and `muxy` uses it automatically.
+When you run `muxy split-right` or `muxy split-down` from inside a Muxy pane, the split starts from the pane you are in. Muxy exports `MUXY_PANE_ID` into every pane, and `muxy` uses it automatically. The new pane belongs to the same top-level tab as its source, including when the source is already a child pane.
 
 Split the current pane to the right:
 
@@ -262,6 +313,10 @@ Output is tab-separated:
 ```
 
 Add `--project` or `--worktree` to list the tabs of another worktree. See [Targeting a project or worktree](#targeting-a-project-or-worktree).
+
+`list-tabs` deliberately stays flat: it includes top-level tabs and their split-child tabs in one indexed list. Switching to a child entry activates its owning top-level tab and focuses that pane.
+
+`muxy tab move <tab> <to-index>` uses this flat list for both arguments. A top-level tab can move to another top-level slot, while a split-child tab can move only to a slot in its current pane.
 
 ### Switch and create tabs
 

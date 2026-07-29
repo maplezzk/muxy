@@ -1,5 +1,30 @@
 import Foundation
 
+enum TerminalTabRenameResult: Equatable {
+    case unchanged
+    case update(String?)
+}
+
+enum TerminalTabRename {
+    static func resolve(
+        input: String,
+        displayedTitle: String,
+        existingCustomTitle: String?
+    ) -> TerminalTabRenameResult {
+        let trimmedInput = input.trimmingCharacters(in: .whitespaces)
+        let trimmedDisplayedTitle = displayedTitle.trimmingCharacters(in: .whitespaces)
+        guard input != displayedTitle, trimmedInput != trimmedDisplayedTitle else {
+            return .unchanged
+        }
+
+        let customTitle = trimmedInput.isEmpty ? nil : trimmedInput
+        guard customTitle != existingCustomTitle else {
+            return .unchanged
+        }
+        return .update(customTitle)
+    }
+}
+
 @MainActor
 @Observable
 final class TerminalTab: Identifiable {
@@ -47,6 +72,7 @@ final class TerminalTab: Identifiable {
     }
 
     let id: UUID
+    var parentTabID: UUID?
     var customTitle: String?
     var colorID: String?
     var customIcon: String?
@@ -69,23 +95,41 @@ final class TerminalTab: Identifiable {
         }
     }
 
-    init(pane: TerminalPaneState) {
+    var localizedTitle: String {
+        if let customTitle {
+            return customTitle
+        }
+        switch content {
+        case let .terminal(pane):
+            return pane.usesDefaultTitle ? L10n.string(key: TerminalPaneState.defaultTitle) : pane.title
+        case let .extensionWebView(state):
+            return state.displayTitle
+        case let .browser(state):
+            return state.localizedDisplayTitle
+        }
+    }
+
+    init(pane: TerminalPaneState, parentTabID: UUID? = nil) {
         id = UUID()
+        self.parentTabID = parentTabID
         content = .terminal(pane)
     }
 
-    init(extensionState: ExtensionTabState) {
+    init(extensionState: ExtensionTabState, parentTabID: UUID? = nil) {
         id = UUID()
+        self.parentTabID = parentTabID
         content = .extensionWebView(extensionState)
     }
 
-    init(browserState: BrowserTabState) {
+    init(browserState: BrowserTabState, parentTabID: UUID? = nil) {
         id = UUID()
+        self.parentTabID = parentTabID
         content = .browser(browserState)
     }
 
     init(restoring snapshot: TerminalTabSnapshot) {
         id = snapshot.id
+        parentTabID = snapshot.parentTabID
         customTitle = snapshot.customTitle
         colorID = snapshot.colorID
         customIcon = snapshot.customIcon
@@ -100,6 +144,7 @@ final class TerminalTab: Identifiable {
                 id: snapshot.paneID ?? UUID(),
                 projectPath: snapshot.projectPath,
                 title: snapshot.paneTitle,
+                usesDefaultTitle: snapshot.paneUsesDefaultTitle,
                 initialWorkingDirectory: restoredWorkingDirectory
             ))
         case .extensionWebView:
@@ -114,7 +159,11 @@ final class TerminalTab: Identifiable {
                     data: snapshot.extensionTabData
                 ))
             } else {
-                content = .terminal(TerminalPaneState(projectPath: snapshot.projectPath, title: snapshot.paneTitle))
+                content = .terminal(TerminalPaneState(
+                    projectPath: snapshot.projectPath,
+                    title: snapshot.paneTitle,
+                    usesDefaultTitle: snapshot.paneUsesDefaultTitle
+                ))
             }
         case .browser:
             let browserState = BrowserTabState(
@@ -131,12 +180,14 @@ final class TerminalTab: Identifiable {
         TerminalTabSnapshot(
             kind: content.kind,
             id: id,
+            parentTabID: parentTabID,
             customTitle: customTitle,
             colorID: colorID,
             customIcon: customIcon,
             isPinned: isPinned,
             projectPath: content.projectPath,
             paneTitle: extensionTabDefaultTitle ?? content.pane?.title,
+            paneUsesDefaultTitle: content.pane?.usesDefaultTitle,
             paneID: content.pane?.id,
             currentWorkingDirectory: content.pane?.currentWorkingDirectory,
             extensionID: content.extensionState?.extensionID,

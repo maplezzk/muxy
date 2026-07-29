@@ -22,6 +22,109 @@ struct SettingsCatalogTests {
     }
 
     @Test
+    func searchFindsSettingsByLocalizedVisibleText() throws {
+        let fixture = try LocalizationTestSupport.makeService(
+            translations: #"""
+            "App Shortcuts" = "App-Tastenkürzel";
+            "Interface" = "Darstellung";
+            """#
+        )
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+
+        let results = SettingsCatalog.matchingItems(
+            query: "tastenkürzel",
+            localization: fixture.service
+        )
+
+        #expect(results.contains { $0.category == .shortcuts && $0.title == "App Shortcuts" })
+        #expect(SettingsCatalog.categoryMatches(
+            .appearance,
+            query: "darstellung",
+            localization: fixture.service
+        ))
+    }
+
+    @Test
+    func everyVisibleCatalogStringExistsInEnglishLocalizationTemplate() throws {
+        let url = RepositoryRoot.find()
+            .appendingPathComponent("Muxy/Resources/Localization/en.lproj/Localizable.strings")
+        let contents = try String(contentsOf: url, encoding: .utf8)
+        let templateKeys = Set(contents.split(separator: "\n").compactMap { line -> String? in
+            guard line.hasPrefix("\""),
+                  let delimiter = line.range(of: "\" = ")
+            else {
+                return nil
+            }
+            return String(line[line.index(after: line.startIndex)..<delimiter.lowerBound])
+        })
+        let catalogKeys = Set(SettingsCatalog.items.flatMap {
+            [$0.title, $0.description, $0.category.title, $0.section]
+        })
+        let missingKeys = catalogKeys.subtracting(templateKeys).sorted()
+
+        #expect(missingKeys.isEmpty, "Missing settings localization keys: \(missingKeys)")
+    }
+
+    @Test
+    func quickTerminalShortcutIsSearchable() {
+        let item = SettingsCatalog.matchingItems(query: "double shift").first {
+            $0.key == "shortcuts.quickTerminal"
+        }
+
+        #expect(item?.category == .quickTerminal)
+        #expect(item?.section == "Shortcut")
+        #expect(!SettingsCatalog.jsonEditableItems.contains { $0.key == "shortcuts.quickTerminal" })
+    }
+
+    @Test
+    func quickTerminalSettingsAreSearchableAndJSONEditable() {
+        let quickTerminalItems = SettingsCatalog.items.filter { $0.category == .quickTerminal }
+
+        #expect(quickTerminalItems.allSatisfy { $0.category == .quickTerminal })
+        #expect(quickTerminalItems.contains { $0.key == QuickTerminalPreferences.enabledKey })
+        #expect(quickTerminalItems.contains { $0.key == QuickTerminalSizePreferences.widthKey })
+        #expect(quickTerminalItems.contains { $0.key == QuickTerminalSizePreferences.heightKey })
+        #expect(quickTerminalItems.contains { $0.key == QuickTerminalAppearancePreferences.transparencyKey })
+        #expect(quickTerminalItems.contains { $0.key == QuickTerminalAppearancePreferences.blurIntensityKey })
+        #expect(SettingsCatalog.matchingItems(query: "terminal size").contains {
+            $0.key == QuickTerminalSizePreferences.widthKey
+        })
+        #expect(SettingsCatalog.matchingItems(query: "disable").contains {
+            $0.key == QuickTerminalPreferences.enabledKey
+        })
+        #expect(SettingsCatalog.jsonEditableItems.contains {
+            $0.key == QuickTerminalPreferences.enabledKey
+        })
+        #expect(SettingsCatalog.jsonEditableItems.contains {
+            $0.key == QuickTerminalSizePreferences.heightKey
+        })
+        #expect(SettingsCatalog.matchingItems(query: "glass").contains {
+            $0.key == QuickTerminalAppearancePreferences.transparencyKey
+        })
+        #expect(SettingsCatalog.jsonEditableItems.contains {
+            $0.key == QuickTerminalAppearancePreferences.blurIntensityKey
+        })
+        #expect(SettingsCatalog.matchingItems(query: "vibrancy").contains {
+            $0.key == QuickTerminalAppearancePreferences.blurIntensityKey
+        })
+        #expect(SettingsCatalog.sectionMatches(query: "terminal size", category: .quickTerminal, section: "Size"))
+        #expect(SettingsCatalog.sectionMatches(query: "vibrancy", category: .quickTerminal, section: "Appearance"))
+    }
+
+    @Test
+    func matchCountSummaryIsOmittedWithoutQuery() {
+        #expect(SettingsCatalog.matchCountSummary(for: .general, query: "") == nil)
+        #expect(SettingsCatalog.matchCountSummary(for: .general, query: "   ") == nil)
+    }
+
+    @Test
+    func matchCountSummaryPluralizesMatches() {
+        #expect(SettingsCatalog.matchCountSummary(for: .shortcuts, query: "hotkeys") == "1 match")
+        #expect(SettingsCatalog.matchCountSummary(for: .shortcuts, query: "  hotkeys  ") == "1 match")
+        #expect(SettingsCatalog.matchCountSummary(for: .mobile, query: "hotkeys") == "0 matches")
+    }
+
+    @Test
     func categoryMatchingUsesCatalogItems() {
         #expect(SettingsCatalog.categoryMatches(.richInput, query: "rich input"))
         #expect(!SettingsCatalog.categoryMatches(.mobile, query: "rich input"))
@@ -52,11 +155,26 @@ struct SettingsCatalogTests {
         #expect(SettingsCatalog.items.contains {
             $0.key == WorktreeListPreferences.orderByMRUKey && $0.category == .appearance
         })
+        #expect(SettingsCatalog.items.contains {
+            $0.key == WorktreeListPreferences.groupWorktreesKey && $0.category == .appearance
+        })
+        #expect(SettingsCatalog.items.contains {
+            $0.key == WorktreeListPreferences.groupWorktreesKey && $0.section == "Sidebar"
+        })
         #expect(SettingsCatalog.matchingItems(query: "mru").contains {
             $0.key == WorktreeListPreferences.orderByMRUKey
         })
         #expect(SettingsCatalog.matchingItems(query: "unread").contains {
             $0.key == WorktreeListPreferences.showUnreadIndicatorKey
+        })
+        #expect(SettingsCatalog.matchingItems(query: "group worktrees").contains {
+            $0.key == WorktreeListPreferences.groupWorktreesKey
+        })
+        #expect(SettingsCatalog.matchingItems(query: "nest worktrees").contains {
+            $0.key == WorktreeListPreferences.groupWorktreesKey
+        })
+        #expect(SettingsCatalog.jsonEditableItems.contains {
+            $0.key == WorktreeListPreferences.groupWorktreesKey
         })
     }
 
@@ -117,11 +235,14 @@ struct SettingsCatalogTests {
         #expect(SettingsCatalog.items.contains { $0.key.hasPrefix("editor.") })
         #expect(SettingsCatalog.jsonEditableItems.contains { $0.key == "editor.richInputImageStrategy" })
         #expect(SettingsCatalog.jsonEditableItems.contains { $0.key == "editor.richInputLineHeightMultiplier" })
+        #expect(!SettingsCatalog.items.contains { $0.key == "muxy.richInput.position" })
+        #expect(!SettingsCatalog.items.contains { $0.key == "muxy.richInput.floating" })
     }
 
     @Test
     func settingsRoutesRoundTripStoredIDs() throws {
         #expect(SettingsRoute(storedID: "builtin.terminal") == .builtin(.terminal))
+        #expect(SettingsRoute(storedID: "builtin.quickTerminal") == .builtin(.quickTerminal))
         #expect(SettingsRoute(storedID: "ext.com.example.tool") == .ext("com.example.tool"))
         #expect(SettingsRoute(storedID: "builtin.missing") == nil)
         #expect(SettingsRoute(storedID: "ext.") == nil)

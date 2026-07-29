@@ -159,6 +159,12 @@ final class ProjectGroupStore {
         return group.workspaceContext(device: device(for: group))
     }
 
+    func resolvedWorkspaceContext(for project: Project) -> WorkspaceContext? {
+        let context = workspaceContext(for: project)
+        guard !project.isRemote || context.isRemote else { return nil }
+        return context
+    }
+
     func device(for project: Project) -> RemoteDevice? {
         if let deviceID = project.remoteDeviceID {
             return remoteDeviceStore.device(id: deviceID)
@@ -266,10 +272,11 @@ final class ProjectGroupStore {
         save()
     }
 
-    func addProject(projectID: UUID, toGroup groupID: UUID) {
-        guard projectID != Project.homeID else { return }
-        guard let index = groups.firstIndex(where: { $0.id == groupID }) else { return }
-        guard groups[index].type == .local else { return }
+    @discardableResult
+    func addProject(projectID: UUID, toGroup groupID: UUID) -> Bool {
+        guard projectID != Project.homeID else { return false }
+        guard let index = groups.firstIndex(where: { $0.id == groupID }) else { return false }
+        guard groups[index].type == .local else { return false }
         for otherIndex in groups.indices where otherIndex != index {
             groups[otherIndex].projectIDs.removeAll { $0 == projectID }
         }
@@ -277,6 +284,7 @@ final class ProjectGroupStore {
             groups[index].projectIDs.append(projectID)
         }
         save()
+        return true
     }
 
     func addProjectToActiveGroup(projectID: UUID) {

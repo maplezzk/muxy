@@ -6,10 +6,11 @@ struct PaneTabStrip: View {
     struct TabSnapshot: Identifiable {
         let id: UUID
         let paneID: UUID?
+        let relatedPaneIDs: [UUID]
         let title: String
         let kind: TerminalTab.Kind
         let isPinned: Bool
-        let hasCustomTitle: Bool
+        let customTitle: String?
         let colorID: String?
         let customIconSymbol: String?
         let extensionID: String?
@@ -18,6 +19,11 @@ struct PaneTabStrip: View {
         let faviconImage: NSImage?
         let detectedAgentIconName: String?
         let agentStatus: AgentStatus?
+        let hasUnread: Bool
+
+        var hasCustomTitle: Bool {
+            customTitle != nil
+        }
     }
 
     let areaID: UUID
@@ -28,7 +34,9 @@ struct PaneTabStrip: View {
     var showDevelopmentBadge = false
     var openProjectPath: String?
     let projectID: UUID
-    var shortcutIndexOffset: Int = 0
+    var shortcutIndicesByTabID: [UUID: Int]?
+    var allowsSplitDrag = true
+    var topLevelGroupID: UUID?
     let onSelectTab: (UUID) -> Void
     let onCreateTab: () -> Void
     var onOpenBrowser: (() -> Void)?
@@ -50,23 +58,37 @@ struct PaneTabStrip: View {
     @Environment(TabDragCoordinator.self) private var dragCoordinator
     @State private var dragState = TabDragState()
 
-    static func snapshots(from tabs: [TerminalTab]) -> [TabSnapshot] {
+    static func snapshots(
+        from tabs: [TerminalTab],
+        including allTabs: [TerminalTab]? = nil
+    ) -> [TabSnapshot] {
         tabs.map { tab in
-            TabSnapshot(
+            let relatedTabs = [tab] + (allTabs ?? []).filter { $0.parentTabID == tab.id }
+            let panes = relatedTabs.compactMap(\.content.pane)
+            let paneIDs = panes.map(\.id)
+            let agentStatuses = paneIDs.compactMap { AgentStatusStore.shared.status(forPane: $0) }
+            let agentStatus = agentStatuses.contains(.waiting)
+                ? AgentStatus.waiting
+                : agentStatuses.first
+            return TabSnapshot(
                 id: tab.id,
                 paneID: tab.content.pane?.id,
-                title: tab.title,
+                relatedPaneIDs: paneIDs,
+                title: tab.localizedTitle,
                 kind: tab.kind,
                 isPinned: tab.isPinned,
-                hasCustomTitle: tab.customTitle != nil,
+                customTitle: tab.customTitle,
                 colorID: tab.colorID,
                 customIconSymbol: tab.customIcon,
                 extensionID: tab.content.extensionState?.extensionID,
                 customIcon: tab.content.extensionState?.customIcon,
-                isOffline: tab.content.pane?.isOffline ?? false,
+                isOffline: !panes.isEmpty && panes.allSatisfy(\.isOffline),
                 faviconImage: tab.content.browserState?.faviconImage,
-                detectedAgentIconName: DetectedAgentStore.shared.iconName(forPane: tab.content.pane?.id),
-                agentStatus: AgentStatusStore.shared.status(forPane: tab.content.pane?.id)
+                detectedAgentIconName: paneIDs.compactMap {
+                    DetectedAgentStore.shared.iconName(forPane: $0)
+                }.first,
+                agentStatus: agentStatus,
+                hasUnread: relatedTabs.contains { NotificationStore.shared.hasUnread(tabID: $0.id) }
             )
         }
     }
@@ -106,19 +128,21 @@ struct PaneTabStrip: View {
                     let symbol = isMaximized
                         ? "arrow.down.right.and.arrow.up.left"
                         : "arrow.up.left.and.arrow.down.right"
-                    let label = isMaximized ? "Restore Pane" : "Maximize Pane"
+                    let label = isMaximized
+                        ? L10n.string("Restore Pane")
+                        : L10n.string("Maximize Pane")
                     IconButton(symbol: symbol, accessibilityLabel: label, action: onToggleMaximize)
-                        .help(shortcutTooltip("Toggle Maximize Pane", for: .toggleMaximizePane))
+                        .help(shortcutTooltip(L10n.string("Toggle Maximize Pane"), for: .toggleMaximizePane))
                 }
-                IconButton(symbol: "square.split.2x1", accessibilityLabel: "Split Right") { onSplit(.horizontal) }
-                    .help(shortcutTooltip("Split Right", for: .splitRight))
-                IconButton(symbol: "square.split.1x2", accessibilityLabel: "Split Down") { onSplit(.vertical) }
-                    .help(shortcutTooltip("Split Down", for: .splitDown))
-                IconButton(symbol: "plus", accessibilityLabel: "New Tab") { onCreateTab() }
-                    .help(shortcutTooltip("New Tab", for: .newTab))
+                IconButton(symbol: "square.split.2x1", accessibilityLabel: L10n.string("Split Right")) { onSplit(.horizontal) }
+                    .help(shortcutTooltip(L10n.string("Split Right"), for: .splitRight))
+                IconButton(symbol: "square.split.1x2", accessibilityLabel: L10n.string("Split Down")) { onSplit(.vertical) }
+                    .help(shortcutTooltip(L10n.string("Split Down"), for: .splitDown))
+                IconButton(symbol: "plus", accessibilityLabel: L10n.string("New Tab")) { onCreateTab() }
+                    .help(shortcutTooltip(L10n.string("New Tab"), for: .newTab))
                 if let onOpenBrowser {
-                    IconButton(symbol: "globe", accessibilityLabel: "Open Browser Tab", action: onOpenBrowser)
-                        .help("Open Browser Tab")
+                    IconButton(symbol: "globe", accessibilityLabel: L10n.string("Open Browser Tab"), action: onOpenBrowser)
+                        .help(L10n.string("Open Browser Tab"))
                 }
             }
             .padding(.leading, UIMetrics.spacing4)
@@ -144,13 +168,13 @@ struct PaneTabStrip: View {
 
         return HStack(spacing: 0) {
             ForEach(Array(tabs.enumerated()), id: \.element.id) { index, tab in
-                let globalIndex = shortcutIndexOffset + index
+                let globalIndex = shortcutIndicesByTabID?[tab.id] ?? index
                 TabCell(
                     tab: tab,
                     active: tab.id == activeTabID,
                     paneFocused: isFocused,
                     areaID: areaID,
-                    hasUnread: NotificationStore.shared.hasUnread(tabID: tab.id),
+                    hasUnread: tab.hasUnread,
                     isAnyDragging: dragState.draggedID != nil,
                     shortcutIndex: globalIndex < 9 ? globalIndex + 1 : nil,
                     closableOthersCount: closableOthersCount(excluding: tab.id),
@@ -212,7 +236,7 @@ struct PaneTabStrip: View {
     }
 
     private func shortcutTooltip(_ name: String, for action: ShortcutAction) -> String {
-        "\(name) (\(KeyBindingStore.shared.combo(for: action).displayString))"
+        L10n.string("\(name) (\(KeyBindingStore.shared.combo(for: action).displayString))")
     }
 
     private var developmentBadge: some View {
@@ -246,9 +270,17 @@ struct PaneTabStrip: View {
             return
         }
 
-        if abs(dy) > 24, !tab.isPinned {
+        if allowsSplitDrag, abs(dy) > 24, !tab.isPinned {
             dragState.isInSplitMode = true
-            dragCoordinator.beginDrag(tabID: tab.id, sourceAreaID: areaID, projectID: projectID)
+            if let topLevelGroupID {
+                dragCoordinator.beginTopLevelDrag(
+                    tabID: tab.id,
+                    sourceGroupID: topLevelGroupID,
+                    projectID: projectID
+                )
+            } else {
+                dragCoordinator.beginDrag(tabID: tab.id, sourceAreaID: areaID, projectID: projectID)
+            }
             dragCoordinator.updatePosition(globalLocation)
             return
         }
@@ -398,8 +430,7 @@ private struct TabCell: View {
     }
 
     private var paneProgress: TerminalProgress? {
-        guard let paneID = tab.paneID else { return nil }
-        return progressStore.progress(for: paneID)
+        tab.relatedPaneIDs.compactMap { progressStore.progress(for: $0) }.first
     }
 
     private var tabProgress: TerminalProgress? {
@@ -407,9 +438,10 @@ private struct TabCell: View {
     }
 
     private var hasCompletionPending: Bool {
-        guard let paneID = tab.paneID else { return false }
-        return progressStore.isCompletionPending(for: paneID)
-            || AgentStatusStore.shared.isCompletionPending(forPane: paneID)
+        tab.relatedPaneIDs.contains {
+            progressStore.isCompletionPending(for: $0)
+                || AgentStatusStore.shared.isCompletionPending(forPane: $0)
+        }
     }
 
     private var statusDotColor: Color? {
@@ -520,31 +552,35 @@ private struct TabCell: View {
             .accessibilityAddTraits(active ? .isSelected : [])
             .accessibilityAddTraits(.isButton)
             .contextMenu {
-                Button("New Tab to the Left") { onCreateLeft() }
-                Button("New Tab to the Right") { onCreateRight() }
+                Button(L10n.string("New Tab to the Left")) { onCreateLeft() }
+                Button(L10n.string("New Tab to the Right")) { onCreateRight() }
                 Divider()
-                Button("Rename Tab") { startRename() }
+                Button(L10n.string("Rename Tab")) { startRename() }
                 if tab.hasCustomTitle {
-                    Button("Reset Title") { onSetCustomTitle(nil) }
+                    Button(L10n.string("Reset Title")) { onSetCustomTitle(nil) }
                 }
-                Button("Set Tab Color…") { showColorPicker = true }
+                Button(L10n.string("Set Tab Color…")) { showColorPicker = true }
                 if tab.colorID != nil {
-                    Button("Reset Tab Color") { onSetColorID(nil) }
+                    Button(L10n.string("Reset Tab Color")) { onSetColorID(nil) }
                 }
                 Divider()
-                Button(tab.isPinned ? "Unpin Tab" : "Pin Tab") {
+                Button(
+                    tab.isPinned
+                        ? L10n.string("Unpin Tab")
+                        : L10n.string("Pin Tab")
+                ) {
                     onTogglePin()
                 }
                 if !tab.isPinned || hasClosableSiblings {
                     Divider()
                     if !tab.isPinned {
-                        Button("Close Tab") { onClose() }
+                        Button(L10n.string("Close Tab")) { onClose() }
                     }
-                    Button("Close Other Tabs") { onCloseOthers() }
+                    Button(L10n.string("Close Other Tabs")) { onCloseOthers() }
                         .disabled(closableOthersCount == 0)
-                    Button("Close Tabs to the Left") { onCloseLeft() }
+                    Button(L10n.string("Close Tabs to the Left")) { onCloseLeft() }
                         .disabled(closableLeftCount == 0)
-                    Button("Close Tabs to the Right") { onCloseRight() }
+                    Button(L10n.string("Close Tabs to the Right")) { onCloseRight() }
                         .disabled(closableRightCount == 0)
                 }
             }
@@ -609,7 +645,7 @@ private struct TabCell: View {
                     .opacity(closeButtonVisible ? 1 : 0)
                     .allowsHitTesting(closeButtonVisible)
                     .onTapGesture(perform: onClose)
-                    .accessibilityLabel("Close Tab")
+                    .accessibilityLabel(L10n.string("Close Tab"))
                     .accessibilityAddTraits(.isButton)
             }
         }
@@ -621,9 +657,11 @@ private struct TabCell: View {
         withAnimation(.easeIn(duration: 0.15)) {
             completionFlashOn = true
         }
-        if active, let paneID = tab.paneID {
-            progressStore.clearCompletion(for: paneID)
-            AgentStatusStore.shared.clearCompletion(for: paneID)
+        if active {
+            for paneID in tab.relatedPaneIDs {
+                progressStore.clearCompletion(for: paneID)
+                AgentStatusStore.shared.clearCompletion(for: paneID)
+            }
         }
         flashTask = Task { @MainActor in
             try await Task.sleep(for: .milliseconds(450))
@@ -640,8 +678,16 @@ private struct TabCell: View {
     }
 
     private func commitRename() {
-        let trimmed = renameText.trimmingCharacters(in: .whitespaces)
-        onSetCustomTitle(trimmed.isEmpty ? nil : trimmed)
+        switch TerminalTabRename.resolve(
+            input: renameText,
+            displayedTitle: tab.title,
+            existingCustomTitle: tab.customTitle
+        ) {
+        case .unchanged:
+            break
+        case let .update(customTitle):
+            onSetCustomTitle(customTitle)
+        }
         isRenaming = false
     }
 
@@ -691,7 +737,7 @@ private struct TabCell: View {
         } else if tab.isOffline, !active {
             Image(systemName: "moon.zzz")
                 .font(.system(size: UIMetrics.fontBody, weight: .semibold))
-                .help("Idle — terminal freed to save memory. Reopens when selected.")
+                .help(L10n.string("Idle — terminal freed to save memory. Reopens when selected."))
         } else if let customIconSymbol = tab.customIconSymbol {
             Image(systemName: customIconSymbol)
                 .font(.system(size: UIMetrics.fontBody, weight: .semibold))

@@ -1,6 +1,13 @@
 import SwiftUI
 
+enum TabFocusedSidebarContent: Equatable {
+    case tabs
+    case agents
+}
+
 struct TabFocusedSidebar: View {
+    var content: TabFocusedSidebarContent = .tabs
+
     @Environment(AppState.self) private var appState
     @Environment(ProjectStore.self) private var projectStore
     @Environment(WorktreeStore.self) private var worktreeStore
@@ -8,6 +15,18 @@ struct TabFocusedSidebar: View {
     @State private var expansionStore = TabFocusedSidebarState.shared
     @AppStorage(HomeProjectPreferences.visibleKey) private var showHomeProject = HomeProjectPreferences.defaultVisible
     @AppStorage(ProjectSortMode.storageKey) private var sortModeRaw = ProjectSortMode.defaultValue.rawValue
+    @AppStorage(WorktreeListPreferences.groupWorktreesKey)
+    private var groupWorktrees = WorktreeListPreferences.defaultGroupWorktrees
+    @AppStorage(SidebarExpandedStyle.storageKey) private var expandedStyleRaw = SidebarExpandedStyle.defaultValue.rawValue
+    @AppStorage("muxy.sidebarExpanded") private var sidebarExpanded = true
+
+    private var expandedStyle: SidebarExpandedStyle {
+        SidebarExpandedStyle(rawValue: expandedStyleRaw) ?? .defaultValue
+    }
+
+    private var isWide: Bool {
+        sidebarExpanded && expandedStyle == .wide
+    }
 
     private var sortMode: ProjectSortMode {
         ProjectSortMode(rawValue: sortModeRaw) ?? .defaultValue
@@ -27,29 +46,29 @@ struct TabFocusedSidebar: View {
         return TabFocusedSidebarProjectSelection.resolve(
             projects: all,
             focusMode: expansionStore.focusMode,
-            activeProjectID: appState.activeProjectID
+            activeProjectID: appState.activeProjectID,
+            content: content
         )
     }
 
     private var rows: [TabFocusedSidebarRowItem] {
-        projects.flatMap { project -> [TabFocusedSidebarRowItem] in
-            var items: [TabFocusedSidebarRowItem] = [.project(project)]
-            guard project.worktreesEnabled, !project.isHome else { return items }
-            for worktree in worktreeStore.list(for: project.id) where !worktree.isPrimary {
-                let key = WorktreeKey(projectID: project.id, worktreeID: worktree.id)
-                guard appState.hasTabs(for: key) else { continue }
-                items.append(.worktree(project, worktree))
-            }
-            return items
-        }
+        TabFocusedSidebarRows.resolve(
+            projects: projects,
+            content: content,
+            groupWorktrees: groupWorktrees,
+            worktreesForProject: { worktreeStore.list(for: $0) },
+            hasTabs: { appState.hasTabs(for: $0) }
+        )
     }
 
     private var shortcutNumbers: [UUID: Int] {
+        guard content == .tabs else { return [:] }
         let entries = TabFocusedTabOrder.entries(
             appState: appState,
             projectStore: projectStore,
             projectGroupStore: projectGroupStore,
-            worktreeStore: worktreeStore
+            worktreeStore: worktreeStore,
+            groupWorktrees: groupWorktrees
         )
         var map: [UUID: Int] = [:]
         for (index, entry) in entries.prefix(9).enumerated() {
@@ -61,16 +80,27 @@ struct TabFocusedSidebar: View {
     var body: some View {
         let numbers = shortcutNumbers
         return VStack(spacing: 0) {
+            HStack(spacing: UIMetrics.spacing2) {
+                WorkspaceSwitcher(isWide: isWide)
+                if isWide {
+                    sortMenu
+                }
+            }
+            .padding(.horizontal, UIMetrics.spacing3)
+            .padding(.top, UIMetrics.spacing2)
+
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(rows) { row in
                         TabFocusedProjectRow(
                             project: row.project,
                             worktree: row.worktree,
-                            shortcutNumbers: numbers
+                            shortcutNumbers: numbers,
+                            content: content,
+                            groupWorktrees: groupWorktrees
                         )
                     }
-                    if !expansionStore.focusMode {
+                    if content == .agents || !expansionStore.focusMode {
                         TabFocusedAddProjectRow(
                             recentlyRemovedProjects: displayedRecentlyRemovedProjects,
                             openProject: openProjectPicker,
@@ -86,6 +116,26 @@ struct TabFocusedSidebar: View {
             SidebarFooter()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    private var sortMenu: some View {
+        Menu {
+            Picker(L10n.string("Sort Projects By"), selection: $sortModeRaw) {
+                ForEach(ProjectSortMode.allCases) { mode in
+                    Label(L10n.string(key: mode.title), systemImage: mode.systemImage).tag(mode.rawValue)
+                }
+            }
+            .pickerStyle(.inline)
+        } label: {
+            SidebarHeaderIconButtonLabel(
+                systemName: "arrow.up.arrow.down",
+                accessibilityLabel: L10n.string("Sort Projects")
+            )
+        }
+        .menuStyle(.button)
+        .menuIndicator(.hidden)
+        .buttonStyle(.plain)
+        .help(L10n.string("Sort Projects: \(L10n.string(key: sortMode.title))"))
     }
 
     private func openProjectPicker() {
@@ -112,18 +162,51 @@ struct TabFocusedSidebar: View {
                 projectGroupStore: projectGroupStore
             )
         } catch {
-            ToastState.shared.show(title: "Could not restore project", body: error.localizedDescription)
+            ToastState.shared.show(title: L10n.string("Could not restore project"), body: error.localizedDescription)
         }
     }
 }
 
+struct AgentsFocusedSidebar: View {
+    var body: some View {
+        TabFocusedSidebar(content: .agents)
+    }
+}
+
 enum TabFocusedSidebarProjectSelection {
-    static func resolve(projects: [Project], focusMode: Bool, activeProjectID: UUID?) -> [Project] {
-        guard focusMode,
+    static func resolve(
+        projects: [Project],
+        focusMode: Bool,
+        activeProjectID: UUID?,
+        content: TabFocusedSidebarContent = .tabs
+    ) -> [Project] {
+        guard content == .tabs,
+              focusMode,
               let activeProjectID,
               let activeProject = projects.first(where: { $0.id == activeProjectID })
         else { return projects }
         return [activeProject]
+    }
+}
+
+enum TabFocusedSidebarRows {
+    static func resolve(
+        projects: [Project],
+        content: TabFocusedSidebarContent,
+        groupWorktrees: Bool,
+        worktreesForProject: (UUID) -> [Worktree],
+        hasTabs: (WorktreeKey) -> Bool
+    ) -> [TabFocusedSidebarRowItem] {
+        projects.flatMap { project in
+            var rows: [TabFocusedSidebarRowItem] = [.project(project)]
+            guard !groupWorktrees, project.worktreesEnabled, !project.isHome else { return rows }
+            for worktree in worktreesForProject(project.id) where !worktree.isPrimary {
+                let key = WorktreeKey(projectID: project.id, worktreeID: worktree.id)
+                guard content == .agents || hasTabs(key) else { continue }
+                rows.append(.worktree(project, worktree))
+            }
+            return rows
+        }
     }
 }
 
@@ -165,14 +248,14 @@ private struct TabFocusedAddProjectRow: View {
                 label
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Add Project")
+            .accessibilityLabel(L10n.string("Add Project"))
         } else {
             Menu {
                 Button(action: openProject) {
-                    Label("Choose Folder…", systemImage: "folder")
+                    Label(L10n.string("Choose Folder…"), systemImage: "folder")
                 }
                 Divider()
-                Section("Recently Removed") {
+                Section(L10n.string("Recently Removed")) {
                     ForEach(recentlyRemovedProjects) { entry in
                         Button {
                             restoreProject(entry.id)
@@ -187,7 +270,7 @@ private struct TabFocusedAddProjectRow: View {
             .menuStyle(.button)
             .menuIndicator(.hidden)
             .buttonStyle(.plain)
-            .accessibilityLabel("Add Project")
+            .accessibilityLabel(L10n.string("Add Project"))
         }
     }
 
@@ -200,7 +283,7 @@ private struct TabFocusedAddProjectRow: View {
                     width: TabFocusedSidebarMetrics.folderIconSize,
                     height: TabFocusedSidebarMetrics.folderIconSize
                 )
-            Text("Add Project")
+            Text(L10n.resource("Add Project"))
                 .font(.system(size: UIMetrics.fontHeadline, weight: .medium))
                 .foregroundStyle(hovered ? MuxyTheme.accent : MuxyTheme.fgMuted)
             Spacer(minLength: 0)

@@ -7,6 +7,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
     case remoteDevices
     case appearance
     case terminal
+    case quickTerminal
     case browser
     case richInput
     case shortcuts
@@ -27,8 +28,9 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
         case .remoteDevices: "Remote Devices"
         case .appearance: "Interface"
         case .terminal: "Terminal"
+        case .quickTerminal: "Quick Terminal"
         case .browser: "Browser"
-        case .richInput: "Rich Input"
+        case .richInput: "Composer"
         case .shortcuts: "Shortcuts"
         case .commands: "Commands"
         case .ai: "AI"
@@ -47,6 +49,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
         case .remoteDevices: "server.rack"
         case .appearance: "macwindow"
         case .terminal: "terminal"
+        case .quickTerminal: "bolt.horizontal.circle"
         case .browser: "globe"
         case .richInput: "text.cursor"
         case .shortcuts: "keyboard"
@@ -114,7 +117,7 @@ struct SettingsCatalogItem: Identifiable, Equatable {
     let category: SettingsCategory
     let section: String
     let defaultValue: AnyHashable?
-    let searchableText: String
+    let aliases: [String]
 
     var id: String { key }
 
@@ -133,9 +136,7 @@ struct SettingsCatalogItem: Identifiable, Equatable {
         self.category = category
         self.section = section
         self.defaultValue = defaultValue
-        searchableText = ([key, title, description, category.title, section] + aliases)
-            .joined(separator: " ")
-            .lowercased()
+        self.aliases = aliases
     }
 }
 
@@ -155,6 +156,15 @@ enum SettingsCatalog {
             section: "Updates",
             defaultValue: UpdateChannel.stable.rawValue,
             aliases: ["release", "beta"]
+        ),
+        SettingsCatalogItem(
+            key: LocalizationSelection.storageKey,
+            title: "App Language",
+            description: "Chooses built-in English or a language provided by an enabled extension.",
+            category: .appearance,
+            section: "Language",
+            defaultValue: LocalizationSelection.builtinValue,
+            aliases: ["localization", "translation", "locale", "i18n"]
         ),
         SettingsCatalogItem(
             key: GeneralSettingsKeys.autoExpandWorktreesOnProjectSwitch,
@@ -180,6 +190,15 @@ enum SettingsCatalog {
             section: "Sidebar",
             defaultValue: SidebarSelection.builtinValue,
             aliases: ["extension sidebar", "webview sidebar"]
+        ),
+        SettingsCatalogItem(
+            key: WorktreeListPreferences.groupWorktreesKey,
+            title: "Nest Worktrees Inside Projects",
+            description: "Places worktrees under their project in Tab Focused and Agents Focused layouts.",
+            category: .appearance,
+            section: "Sidebar",
+            defaultValue: WorktreeListPreferences.defaultGroupWorktrees,
+            aliases: ["group worktrees", "nested", "folders", "tab focused", "agents focused"]
         ),
         SettingsCatalogItem(
             key: WorktreeListPreferences.showUnreadIndicatorKey,
@@ -235,11 +254,11 @@ enum SettingsCatalog {
         SettingsCatalogItem(
             key: FileOpenerSelection.storageKey,
             title: "Default Opener",
-            description: "Chooses the built-in IDE or an extension opener for terminal file links.",
+            description: "Uses the separately selected top-bar project target or an extension opener for terminal file links.",
             category: .projects,
             section: "Open Files With",
             defaultValue: FileOpenerSelection.builtinValue,
-            aliases: ["file opener", "terminal links", "editor", "extension opener"]
+            aliases: ["file opener", "terminal links", "editor", "extension opener", "top bar"]
         ),
         SettingsCatalogItem(
             key: GeneralSettingsKeys.defaultWorktreePathTemplate,
@@ -387,43 +406,30 @@ enum SettingsCatalog {
         ),
         SettingsCatalogItem(
             key: "editor.richInputImageStrategy",
-            title: "Rich Input Image Submission",
-            description: "Chooses how rich input submits images.",
+            title: "Composer Image Submission",
+            description: "Chooses how the composer submits images.",
             category: .richInput,
-            section: "Rich Input",
-            defaultValue: RichInputImageStrategy.clipboard.rawValue
-        ),
-        SettingsCatalogItem(
-            key: RichInputPreferences.positionKey,
-            title: "Rich Input Position",
-            description: "Controls where the rich input panel appears.",
-            category: .richInput,
-            section: "Rich Input",
-            defaultValue: RichInputPreferences.defaultPosition.rawValue
-        ),
-        SettingsCatalogItem(
-            key: RichInputPreferences.floatingKey,
-            title: "Floating Rich Input",
-            description: "Shows rich input as a floating panel.",
-            category: .richInput,
-            section: "Rich Input",
-            defaultValue: RichInputPreferences.defaultFloating
+            section: "Composer",
+            defaultValue: RichInputImageStrategy.clipboard.rawValue,
+            aliases: ["rich input"]
         ),
         SettingsCatalogItem(
             key: "editor.richInputFontFamily",
-            title: "Rich Input Font Family",
-            description: "Controls the rich input editor font family.",
+            title: "Composer Font Family",
+            description: "Controls the composer editor font family.",
             category: .richInput,
-            section: "Rich Input",
-            defaultValue: EditorSettings.defaultRichInputFontFamily
+            section: "Composer",
+            defaultValue: EditorSettings.defaultRichInputFontFamily,
+            aliases: ["rich input"]
         ),
         SettingsCatalogItem(
             key: "editor.richInputLineHeightMultiplier",
-            title: "Rich Input Line Height",
-            description: "Controls line height in rich input.",
+            title: "Composer Line Height",
+            description: "Controls line height in the composer.",
             category: .richInput,
-            section: "Rich Input",
-            defaultValue: Double(EditorSettings.defaultRichInputLineHeightMultiplier)
+            section: "Composer",
+            defaultValue: Double(EditorSettings.defaultRichInputLineHeightMultiplier),
+            aliases: ["rich input"]
         ),
 
         SettingsCatalogItem(
@@ -449,6 +455,59 @@ enum SettingsCatalog {
             category: .shortcuts,
             section: "App Shortcuts",
             aliases: ["keybindings", "hotkeys"]
+        ),
+        SettingsCatalogItem(
+            key: QuickTerminalPreferences.enabledKey,
+            title: "Enable Quick Terminal",
+            description: "Controls whether the Quick Terminal shortcut listener and shell can run.",
+            category: .quickTerminal,
+            section: "General",
+            defaultValue: QuickTerminalPreferences.defaultIsEnabled,
+            aliases: ["disable", "off", "global terminal"]
+        ),
+        SettingsCatalogItem(
+            key: "shortcuts.quickTerminal",
+            title: "Quick Terminal",
+            description: "Configures the system-wide shortcut for the quick terminal.",
+            category: .quickTerminal,
+            section: "Shortcut",
+            aliases: ["double shift", "quick terminal", "global shortcut", "hotkey"]
+        ),
+        SettingsCatalogItem(
+            key: QuickTerminalSizePreferences.widthKey,
+            title: "Quick Terminal Width",
+            description: "Sets the width of the quick terminal in points.",
+            category: .quickTerminal,
+            section: "Size",
+            defaultValue: QuickTerminalSizePreferences.defaultWidth,
+            aliases: ["size", "panel", "window"]
+        ),
+        SettingsCatalogItem(
+            key: QuickTerminalSizePreferences.heightKey,
+            title: "Quick Terminal Height",
+            description: "Sets the height of the quick terminal in points.",
+            category: .quickTerminal,
+            section: "Size",
+            defaultValue: QuickTerminalSizePreferences.defaultHeight,
+            aliases: ["size", "panel", "window"]
+        ),
+        SettingsCatalogItem(
+            key: QuickTerminalAppearancePreferences.transparencyKey,
+            title: "Quick Terminal Transparency",
+            description: "Controls how much of the desktop shows through the terminal background.",
+            category: .quickTerminal,
+            section: "Appearance",
+            defaultValue: QuickTerminalAppearancePreferences.defaultTransparency,
+            aliases: ["opacity", "glass", "background", "appearance"]
+        ),
+        SettingsCatalogItem(
+            key: QuickTerminalAppearancePreferences.blurIntensityKey,
+            title: "Quick Terminal Vibrancy",
+            description: "Controls the native macOS material intensity behind the terminal.",
+            category: .quickTerminal,
+            section: "Appearance",
+            defaultValue: QuickTerminalAppearancePreferences.defaultBlurIntensity,
+            aliases: ["blur", "glass", "frost", "background", "appearance"]
         ),
         SettingsCatalogItem(
             key: "shortcuts.customCommands",
@@ -602,17 +661,48 @@ enum SettingsCatalog {
         item.defaultValue != nil
     }
 
-    static func matchingItems(query: String) -> [SettingsCatalogItem] {
-        let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    static func matchingItems(
+        query: String,
+        localization: LocalizationService = .shared
+    ) -> [SettingsCatalogItem] {
+        let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else { return items }
-        return items.filter { $0.searchableText.contains(normalized) }
+        return items.filter { item in
+            LocalizedSearch.matches(
+                query: normalized,
+                localizedKeys: [
+                    item.title,
+                    item.description,
+                    item.category.title,
+                    item.section,
+                ],
+                verbatimValues: [item.key] + item.aliases,
+                localization: localization
+            )
+        }
     }
 
-    static func categoryMatches(_ category: SettingsCategory, query: String) -> Bool {
+    static func matchCountSummary(for category: SettingsCategory, query: String) -> String? {
+        let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return nil }
+        let count = matchingItems(query: normalized).count(where: { $0.category == category })
+        guard count != 1 else { return L10n.string("1 match") }
+        return L10n.string("\(count) matches")
+    }
+
+    static func categoryMatches(
+        _ category: SettingsCategory,
+        query: String,
+        localization: LocalizationService = .shared
+    ) -> Bool {
         let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else { return true }
-        return category.title.localizedCaseInsensitiveContains(normalized)
-            || matchingItems(query: normalized).contains { $0.category == category }
+        return LocalizedSearch.matches(
+            query: normalized,
+            localizedKeys: [category.title],
+            localization: localization
+        )
+            || matchingItems(query: normalized, localization: localization).contains { $0.category == category }
     }
 
     static func sectionMatches(query: String, category: SettingsCategory?, section: String) -> Bool {

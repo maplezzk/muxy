@@ -52,6 +52,7 @@ For the other surfaces, list and parse the **tab-separated** output (the first c
 | `muxy list-panes` | `<pane-id>  <title>  <cwd>  <focused>` |
 | `muxy list-projects` | `<project-id>  <name>  <path>  <active>` |
 | `muxy list-worktrees [project]` | `<worktree-id>  <name>  <path>  <branch>  <active>` |
+| `muxy list-workspaces` | `<workspace-id>  <name>  <project-count>  <active>` |
 | `muxy list-tabs` | `<index>  <tab-id>  <kind>  <title>  <active>` |
 
 ```bash
@@ -94,6 +95,38 @@ muxy refresh-worktrees
 
 `create-worktree <name>` defaults the branch to `<name>` and creates it; pass `--existing` to check out an existing branch, `--base <branch>` to fork from a specific base, and `--path`/`--project` to place or target it. Without `--path`, Muxy uses the project's worktree path template or folder setting and resolves the required `{branch}` variable from the requested branch. After Git operations done outside Muxy, `refresh-worktrees` re-reads worktrees from Git.
 
+## Workspaces
+
+Workspaces are named filters for the sidebar. A project can belong to one workspace at a time.
+
+```bash
+muxy list-workspaces                   # <id>  <name>  <project-count>  <active>
+muxy create-workspace "My Workspace"   # creates, returns the workspace ID
+muxy switch-workspace "My Workspace"   # filter sidebar to that workspace
+muxy rename-workspace <id> "New Name"
+muxy delete-workspace <id>
+```
+
+Workspaces resolve by UUID or exact case-insensitive name.
+
+## Projects
+
+`create-project` attaches an existing directory as a project, or with `--create` creates a new one:
+
+```bash
+muxy create-project ~/code/my-app                      # attach existing directory
+muxy create-project ~/code/new-project --create         # create directory then attach
+muxy create-project ~/code/my-app --workspace "Work"    # attach and move to a workspace
+muxy create-project ~/code/my-app --name "My App"       # set custom name
+```
+
+Move a project between workspaces:
+
+```bash
+muxy attach-project "My App" --workspace "Work"   # move project into workspace
+muxy detach-project "My App"                      # remove from all workspaces
+```
+
 ## Tabs
 
 A tab is a whole surface (terminal, source control, an extension) within the active worktree; panes split *inside* a tab. Open one, move between them, or jump straight to a known tab:
@@ -106,7 +139,7 @@ muxy next-tab                # cycle forward
 muxy previous-tab            # cycle backward
 ```
 
-Use `switch-tab` (resolves index/ID/title) when you know the target; reach for `next-tab`/`previous-tab` only for relative cycling. List first with `muxy list-tabs` when you need the index or ID.
+Use `switch-tab` (resolves index/ID/title) when you know the target; reach for `next-tab`/`previous-tab` only for relative cycling. List first with `muxy list-tabs` when you need the index or ID. The list is flat and includes split-child tabs; switching to one activates its owning top-level tab and focuses that pane.
 
 `new-tab`, `list-tabs`, `switch-tab`, `next-tab`, `previous-tab`, and `split-right`/`split-down` accept `--project <name|id|path>` and `--worktree <name|id|branch>` to target a specific worktree. Both are optional: with neither they act on the active worktree; `--worktree` alone resolves in the active project, then searches all projects for a unique match (ambiguous — pass `--project`); `--project` alone uses that project's active/preferred worktree; both are explicit. Targeting acts in the target worktree's background workspace — your visible view stays put. Use `switch-project`/`switch-worktree` to actually move focus.
 
@@ -123,13 +156,13 @@ Customize and manage a tab with `muxy tab <op> <index|id|title>`. The target res
 muxy tab rename 0 "Server"          # omit the title to reset to the default
 muxy tab set-color 0 blue           # palette name; omit to reset
 muxy tab set-icon 0 "flame.fill"    # any SF Symbol name; omit to reset
-muxy tab pin 0                       # pin / unpin (pinned tabs can't be closed)
+muxy tab pin 0                       # pin / unpin (blocks direct close)
 muxy tab unpin 0
-muxy tab move 0 2                    # reorder within the tab's area
+muxy tab move 0 2                    # reorder a root tab or a child within its pane
 muxy tab close "Server"             # close by index/id/title
 ```
 
-The color must be one of Muxy's palette names: `red`, `orange`, `amber`, `yellow`, `lime`, `green`, `teal`, `cyan`, `blue`, `indigo`, `violet`, `pink`. `set-icon` takes an SF Symbol name. Pin a tab to protect it from `tab close` / `close-pane`; `tab close` is a no-op on a pinned tab, so `unpin` first.
+The color must be one of Muxy's palette names: `red`, `orange`, `amber`, `yellow`, `lime`, `green`, `teal`, `cyan`, `blue`, `indigo`, `violet`, `pink`. `set-icon` takes an SF Symbol name. Pin a tab to protect it from a direct `tab close` / `close-pane`; `tab close` is a no-op on a pinned tab, so `unpin` first. Closing a parent tab still closes every child tab it owns, including pinned children.
 
 ## Browser
 
