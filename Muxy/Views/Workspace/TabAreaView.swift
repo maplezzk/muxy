@@ -19,6 +19,12 @@ struct TabAreaView: View {
 
     private static let externalDragHideDebounce: Duration = .milliseconds(80)
 
+    private var isInSplit: Bool {
+        guard let worktreeKey else { return false }
+        guard let layout = appState.visibleLayout(for: worktreeKey, groupID: topLevelGroupID) else { return false }
+        return layout.allPanes().count > 1
+    }
+
     private var ownsActivePaneDrag: Bool {
         guard let drag = dragCoordinator.activeDrag,
               !drag.isTopLevel,
@@ -30,24 +36,30 @@ struct TabAreaView: View {
     }
 
     var body: some View {
-        TabContentView(
-            tab: tab,
-            area: area,
-            focused: isFocused && isActiveProject,
-            visible: isActiveProject,
-            areaID: area.id,
-            topLevelGroupID: topLevelGroupID,
-            onFocus: onFocus,
-            onProcessExit: onForceCloseTab,
-            onSplitRequest: { direction, position in
-                appState.dispatch(.splitArea(.init(
-                    projectID: projectID,
-                    areaID: area.id,
-                    direction: direction,
-                    position: position
-                )))
+        VStack(spacing: 0) {
+            if isInSplit {
+                SplitPaneHeader(onClose: onForceCloseTab)
             }
-        )
+            TabContentView(
+                tab: tab,
+                area: area,
+                focused: isFocused && isActiveProject,
+                visible: isActiveProject,
+                areaID: area.id,
+                topLevelGroupID: topLevelGroupID,
+                onFocus: onFocus,
+                onProcessExit: onForceCloseTab,
+                onSplitRequest: { direction, position in
+                    appState.dispatch(.splitArea(.init(
+                        projectID: projectID,
+                        areaID: area.id,
+                        direction: direction,
+                        position: position
+                    )))
+                },
+                onClosePaneRequest: onForceCloseTab
+            )
+        }
         .overlay {
             if ownsActivePaneDrag,
                dragCoordinator.hoveredAreaID == area.id,
@@ -160,6 +172,7 @@ private struct TabContentView: View {
     let onFocus: () -> Void
     let onProcessExit: () -> Void
     let onSplitRequest: (SplitDirection, SplitPosition) -> Void
+    let onClosePaneRequest: () -> Void
     @AppStorage(BrowserPreferences.enabledKey) private var browserEnabled = true
 
     var body: some View {
@@ -173,10 +186,14 @@ private struct TabContentView: View {
                 topLevelGroupID: topLevelGroupID,
                 onFocus: onFocus,
                 onProcessExit: onProcessExit,
-                onSplitRequest: onSplitRequest
+                onSplitRequest: onSplitRequest,
+                onClosePaneRequest: onClosePaneRequest
             )
         case let .extensionWebView(extensionState):
             ExtensionWebViewPane(state: extensionState, focused: focused, onFocus: onFocus)
+                .contextMenu {
+                    Button("Close Pane") { onClosePaneRequest() }
+                }
         case let .browser(browserState):
             if browserEnabled {
                 BrowserPane(
@@ -185,6 +202,9 @@ private struct TabContentView: View {
                     topLevelGroupID: topLevelGroupID,
                     onFocus: onFocus
                 )
+                .contextMenu {
+                    Button("Close Pane") { onClosePaneRequest() }
+                }
             } else {
                 BrowserDisabledPlaceholder()
                     .contentShape(Rectangle())
@@ -206,6 +226,25 @@ private struct BrowserDisabledPlaceholder: View {
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(MuxyTheme.bg)
+    }
+}
+
+private struct SplitPaneHeader: View {
+    let onClose: () -> Void
+
+    var body: some View {
+        HStack {
+            Spacer()
+            Button(action: onClose) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 8)
+        }
+        .frame(height: 22)
         .background(MuxyTheme.bg)
     }
 }

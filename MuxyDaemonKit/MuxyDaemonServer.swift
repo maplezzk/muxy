@@ -351,12 +351,19 @@ public final class MuxyDaemonServer {
                 sessionID: existing.id,
                 created: false,
                 exited: existing.isExited,
-                exitStatus: existing.exitStatus
+                exitStatus: existing.exitStatus,
+                bracketedPaste: existing.terminalModes.bracketedPaste,
+                mouseMode: existing.terminalModes.mouseMode
             )), to: client)
             let replay = existing.scrollback.contents()
             if !replay.isEmpty {
                 sendOutput(replay, to: client)
             }
+            let modeRestore = existing.terminalModes.modeRestoreSequence()
+            if !modeRestore.isEmpty {
+                sendOutput(modeRestore, to: client)
+            }
+            existing.notifyResize()
             if existing.isExited, let status = existing.exitStatus {
                 send(.exited(status: status), to: client)
             }

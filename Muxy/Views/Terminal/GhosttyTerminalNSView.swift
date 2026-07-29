@@ -29,6 +29,7 @@ final class GhosttyTerminalNSView: NSView,
     var onExternalDragHoverChange: ((Bool) -> Void)?
     var onProcessExit: (() -> Void)?
     var onSplitRequest: ((SplitDirection, SplitPosition) -> Void)?
+    var onClosePaneRequest: (() -> Void)?
     var onSearchStart: ((String?) -> Void)?
     var onSearchEnd: (() -> Void)?
     var onSearchTotal: ((Int?) -> Void)?
@@ -333,6 +334,7 @@ final class GhosttyTerminalNSView: NSView,
         onExternalDragHoverChange = nil
         onProcessExit = nil
         onSplitRequest = nil
+        onClosePaneRequest = nil
         onSearchStart = nil
         onSearchEnd = nil
         onSearchTotal = nil
@@ -1403,6 +1405,15 @@ final class GhosttyTerminalNSView: NSView,
         menu.addItem(contextSplitMenuItem(title: "Split Down", direction: .vertical, position: .second))
         menu.addItem(contextSplitMenuItem(title: "Split Up", direction: .vertical, position: .first))
 
+        menu.addItem(.separator())
+
+        let closeItem = ClosureMenuItem(title: "Close Pane") { [weak self] in
+            self?.onClosePaneRequest?()
+        }
+        closeItem.keyEquivalent = "w"
+        closeItem.keyEquivalentModifierMask = [.command, .shift]
+        menu.addItem(closeItem)
+
         NSMenu.popUpContextMenu(menu, with: event, for: self)
     }
 
@@ -1419,7 +1430,25 @@ final class GhosttyTerminalNSView: NSView,
             return
         }
         guard let text = NSPasteboard.general.string(forType: .string), !text.isEmpty else { return }
-        insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
+        if let surface, isBracketedPasteEnabled(surface: surface) {
+            let sanitized = text.replacingOccurrences(of: "\u{1B}[201~", with: "")
+            recordTextInput(sanitized)
+            sendRemoteBytes(
+                TerminalControlBytes.bracketedPasteStart
+                    + Data(sanitized.utf8)
+                    + TerminalControlBytes.bracketedPasteEnd
+            )
+        } else {
+            insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
+        }
+    }
+
+    private func isBracketedPasteEnabled(surface: ghostty_surface_t) -> Bool {
+        var cells = ghostty_cells_s()
+        guard ghostty_surface_read_cells(surface, &cells) else { return false }
+        let enabled = cells.bracketed_paste
+        ghostty_surface_free_cells(surface, &cells)
+        return enabled
     }
 
     nonisolated static func isImagePasteShortcut(

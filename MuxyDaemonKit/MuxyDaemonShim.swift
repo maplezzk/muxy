@@ -54,6 +54,7 @@ public struct MuxyDaemonShim {
 
         let size = currentTerminalSize()
         let reader = DaemonFrameReader()
+        var modeRestore = Data()
         do {
             try client.handshake(role: MuxyDaemonProtocol.shimRole, reader: reader)
             try client.send(control: .attach(DaemonAttachRequest(
@@ -70,6 +71,9 @@ public struct MuxyDaemonShim {
             switch message {
             case let .attached(response):
                 log("attached session \(response.sessionID) created \(response.created) exited \(response.exited)")
+                if !response.created {
+                    modeRestore = Self.buildModeRestore(bracketedPaste: response.bracketedPaste, mouseMode: response.mouseMode)
+                }
             case let .error(reason):
                 FileHandle.standardError.write(Data("muxyd shim: \(reason)\r\n".utf8))
                 return 1
@@ -82,7 +86,7 @@ public struct MuxyDaemonShim {
             return 1
         }
 
-        return pumpLoop(client: client, reader: reader)
+        return pumpLoop(client: client, reader: reader, modeRestore: modeRestore)
     }
 
     private func connectWithSpawn(client: MuxyDaemonClient) throws {
@@ -135,7 +139,7 @@ public struct MuxyDaemonShim {
         signal(SIGPIPE, SIG_IGN)
     }
 
-    private func pumpLoop(client: MuxyDaemonClient, reader: DaemonFrameReader) -> Int32 {
+    private func pumpLoop(client: MuxyDaemonClient, reader: DaemonFrameReader, modeRestore: Data = Data()) -> Int32 {
         client.setBlocking(false)
         let originalStdoutFlags = fcntl(STDOUT_FILENO, F_GETFL)
         _ = fcntl(STDOUT_FILENO, F_SETFL, originalStdoutFlags | O_NONBLOCK)
@@ -159,6 +163,10 @@ public struct MuxyDaemonShim {
         } catch {
             flushBlocking(outbound)
             return exitStatus
+        }
+
+        if !modeRestore.isEmpty {
+            outbound.append(modeRestore)
         }
 
         while !shouldExit {
@@ -297,4 +305,24 @@ public struct MuxyDaemonShim {
 
 enum MuxyDaemonShimSharedState {
     nonisolated(unsafe) static var winChReceived = false
+}
+
+extension MuxyDaemonShim {
+    static func buildModeRestore(bracketedPaste: Bool, mouseMode: UInt16) -> Data {
+        var result = Data()
+        if bracketedPaste {
+            result.append(contentsOf: Array("\u{1B}[?2004h".utf8))
+        }
+        switch mouseMode {
+        case 1000:
+            result.append(contentsOf: Array("\u{1B}[?1000h".utf8))
+        case 1002:
+            result.append(contentsOf: Array("\u{1B}[?1002h".utf8))
+        case 1003:
+            result.append(contentsOf: Array("\u{1B}[?1003h".utf8))
+        default:
+            break
+        }
+        return result
+    }
 }

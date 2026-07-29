@@ -10,6 +10,7 @@ struct TerminalPane: View {
     let onFocus: () -> Void
     let onProcessExit: () -> Void
     let onSplitRequest: (SplitDirection, SplitPosition) -> Void
+    let onClosePaneRequest: () -> Void
 
     @Bindable private var ownership = PaneOwnershipStore.shared
     @Environment(\.overlayActive) private var overlayActive
@@ -57,7 +58,8 @@ struct TerminalPane: View {
                 topLevelGroupID: topLevelGroupID,
                 onFocus: onFocus,
                 onProcessExit: onProcessExit,
-                onSplitRequest: onSplitRequest
+                onSplitRequest: onSplitRequest,
+                onClosePaneRequest: onClosePaneRequest
             )
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Terminal")
@@ -192,6 +194,7 @@ struct TerminalBridge: NSViewRepresentable {
     let onFocus: () -> Void
     let onProcessExit: () -> Void
     let onSplitRequest: (SplitDirection, SplitPosition) -> Void
+    let onClosePaneRequest: () -> Void
     @Environment(\.overlayActive) private var overlayActive
     @Environment(\.activeWorktreeKey) private var worktreeKey
     @Environment(\.paneWorkspaceContext) private var workspaceContext
@@ -377,6 +380,7 @@ struct TerminalBridge: NSViewRepresentable {
         surface.onFocus = onFocus
         surface.onProcessExit = onProcessExit
         surface.onSplitRequest = onSplitRequest
+        surface.onClosePaneRequest = onClosePaneRequest
         surface.onExternalDragHoverChange = makeExternalDragHoverHandler(areaID: areaID)
         surface.onTitleChange = { [weak state] title in
             DispatchQueue.main.async {

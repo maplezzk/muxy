@@ -44,12 +44,16 @@ public struct DaemonAttachedResponse: Codable, Equatable, Sendable {
     public var created: Bool
     public var exited: Bool
     public var exitStatus: Int32?
+    public var bracketedPaste: Bool
+    public var mouseMode: UInt16
 
-    public init(sessionID: UUID, created: Bool, exited: Bool, exitStatus: Int32?) {
+    public init(sessionID: UUID, created: Bool, exited: Bool, exitStatus: Int32?, bracketedPaste: Bool = false, mouseMode: UInt16 = 0) {
         self.sessionID = sessionID
         self.created = created
         self.exited = exited
         self.exitStatus = exitStatus
+        self.bracketedPaste = bracketedPaste
+        self.mouseMode = mouseMode
     }
 }
 

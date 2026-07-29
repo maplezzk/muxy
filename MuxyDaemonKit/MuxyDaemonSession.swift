@@ -23,6 +23,7 @@ public final class MuxyDaemonSession {
     }
 
     public private(set) var scrollback: MuxyDaemonRingBuffer
+    public private(set) var terminalModes = TerminalModeTracker()
 
     public private(set) var masterFileDescriptor: Int32 = -1
 
@@ -96,6 +97,7 @@ public final class MuxyDaemonSession {
 
     public func appendScrollback(_ data: Data) {
         scrollback.append(data)
+        terminalModes.process(data)
     }
 
     public func write(_ data: Data) -> Bool {
@@ -128,6 +130,14 @@ public final class MuxyDaemonSession {
         guard masterFileDescriptor >= 0 else { return }
         var size = winsize(ws_row: rows, ws_col: cols, ws_xpixel: 0, ws_ypixel: 0)
         _ = ioctl(masterFileDescriptor, TIOCSWINSZ, &size)
+    }
+
+    public func notifyResize() {
+        guard masterFileDescriptor >= 0, !isExited else { return }
+        let pgrp = tcgetpgrp(masterFileDescriptor)
+        if pgrp > 0 {
+            kill(-pgrp, SIGWINCH)
+        }
     }
 
     public func foregroundProcessID() -> Int32? {

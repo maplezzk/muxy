@@ -106,6 +106,7 @@ protocol TerminalSurface: TerminalInputTransactionTarget {
     var onExternalDragHoverChange: ((Bool) -> Void)? { get set }
     var onProcessExit: (() -> Void)? { get set }
     var onSplitRequest: ((SplitDirection, SplitPosition) -> Void)? { get set }
+    var onClosePaneRequest: (() -> Void)? { get set }
     var onProgressReport: ((TerminalProgress?) -> Void)? { get set }
     var onCmdClickFile: ((String) -> Void)? { get set }
     var resolveCmdHoverFile: ((String) -> Bool)? { get set }
@@ -116,6 +117,7 @@ protocol TerminalSurface: TerminalInputTransactionTarget {
     var overlayActive: Bool { get set }
     var foregroundProcessID: Int32? { get }
     var hasLiveSurface: Bool { get }
+    var daemonSessionID: UUID? { get }
 
     func tearDown()
     func setVisible(_ visible: Bool)
