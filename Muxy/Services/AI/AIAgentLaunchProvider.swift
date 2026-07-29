@@ -111,6 +111,44 @@ struct AgentTabLaunchOption: Identifiable {
             )
         }
     }
+
+    @MainActor
+    static func resolveLocal() -> [Self] {
+        resolveLocal(providers: AIProviderRegistry.shared.agentLaunchProviders)
+    }
+
+    @MainActor
+    static func resolveRemote(destination: SSHDestination) async throws -> [Self] {
+        let providers = AIProviderRegistry.shared.agentLaunchProviders
+        let availableProviderIDs = try await RemoteAgentLaunchAvailability.resolve(
+            providers: providers,
+            destination: destination
+        )
+        return resolveRemote(providers: providers, availableProviderIDs: availableProviderIDs)
+    }
+}
+
+@MainActor
+enum AgentTabLaunchOptionsLoader {
+    typealias LocalResolver = @MainActor () -> [AgentTabLaunchOption]
+    typealias RemoteResolver = @MainActor (SSHDestination) async throws -> [AgentTabLaunchOption]
+
+    static func resolve(
+        context: WorkspaceContext,
+        localResolver: LocalResolver = { AgentTabLaunchOption.resolveLocal() },
+        remoteResolver: RemoteResolver = { destination in
+            try await AgentTabLaunchOption.resolveRemote(destination: destination)
+        }
+    ) async throws -> [AgentTabLaunchOption] {
+        let options: [AgentTabLaunchOption] = switch context {
+        case .local:
+            localResolver()
+        case let .ssh(destination):
+            try await remoteResolver(destination)
+        }
+        try Task.checkCancellation()
+        return options
+    }
 }
 
 enum RemoteAgentLaunchAvailabilityError: LocalizedError {
