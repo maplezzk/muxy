@@ -2,6 +2,20 @@ import AppKit
 import MuxyShared
 import SwiftUI
 
+enum TabFocusedActivityScope {
+    static func worktreeIDs(
+        rowWorktreeID: UUID?,
+        primaryWorktreeID: UUID?,
+        hiddenWorktreeIDs: Set<UUID>
+    ) -> Set<UUID> {
+        if let rowWorktreeID {
+            return [rowWorktreeID]
+        }
+        guard let primaryWorktreeID else { return hiddenWorktreeIDs }
+        return hiddenWorktreeIDs.union([primaryWorktreeID])
+    }
+}
+
 struct TabFocusedProjectRow: View {
     let project: Project
     var worktree: Worktree?
@@ -55,27 +69,43 @@ struct TabFocusedProjectRow: View {
         return worktreeStore.primary(for: project.id)?.id == activeID
     }
 
-    private var rowActivity: TerminalActivity? {
-        let agentStore = AgentStatusStore.shared
-        let hasProgress: Bool
-        let agentStatus: AgentStatus?
-        let unreadCount: Int
-        let completionPending: Bool
+    private var hiddenWorktreeIDs: Set<UUID> {
+        guard !isWorktreeRow else { return [] }
+        let secondaries = worktreeStore.list(for: project.id).filter { !$0.isPrimary }
+        guard !secondaries.isEmpty else { return [] }
+        if groupWorktrees, project.worktreesEnabled, isExpanded {
+            return []
+        }
 
-        if let worktree {
-            hasProgress = progressStore.hasActiveProgress(forWorktree: worktree.id)
-            agentStatus = agentStore.status(forWorktree: worktree.id)
-            unreadCount = showUnreadIndicator
-                ? notificationStore.unreadCount(for: project.id, worktreeID: worktree.id)
-                : 0
-            completionPending = progressStore.hasCompletionPending(forWorktree: worktree.id)
-                || agentStore.hasCompletionPending(forWorktree: worktree.id)
-        } else {
-            hasProgress = progressStore.hasActiveProgress(for: project.id)
-            agentStatus = agentStore.status(forProject: project.id)
-            unreadCount = notificationStore.unreadCount(for: project.id)
-            completionPending = progressStore.hasCompletionPending(for: project.id)
-                || agentStore.hasCompletionPending(forProject: project.id)
+        let revealed = TabFocusedSidebarRows.standaloneWorktrees(
+            project: project,
+            content: content,
+            groupWorktrees: groupWorktrees,
+            worktrees: secondaries,
+            hasTabs: { appState.hasTabs(for: $0) }
+        )
+        return Set(secondaries.map(\.id)).subtracting(revealed.map(\.id))
+    }
+
+    private var rowActivity: TerminalActivity? {
+        let worktreeIDs = TabFocusedActivityScope.worktreeIDs(
+            rowWorktreeID: worktree?.id,
+            primaryWorktreeID: worktreeStore.primary(for: project.id)?.id,
+            hiddenWorktreeIDs: hiddenWorktreeIDs
+        )
+        guard !worktreeIDs.isEmpty else { return nil }
+
+        let agentStore = AgentStatusStore.shared
+        let hasProgress = worktreeIDs.contains { progressStore.hasActiveProgress(forWorktree: $0) }
+        let agentStatus = worktreeIDs
+            .compactMap { agentStore.status(forWorktree: $0) }
+            .max { $0.priority < $1.priority }
+        let unreadCount = showUnreadIndicator
+            ? worktreeIDs.reduce(0) { $0 + notificationStore.unreadCount(for: project.id, worktreeID: $1) }
+            : 0
+        let completionPending = worktreeIDs.contains {
+            progressStore.hasCompletionPending(forWorktree: $0)
+                || agentStore.hasCompletionPending(forWorktree: $0)
         }
 
         return TerminalActivity.resolve(

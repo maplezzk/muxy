@@ -98,6 +98,24 @@ struct AppLayoutTests {
 
         #expect(projects == [first, second])
     }
+
+    @Test("expanded project activity is scoped to the active worktree")
+    func expandedProjectActivityUsesActiveWorktree() {
+        let activeWorktreeID = UUID()
+
+        #expect(
+            ExpandedProjectActivityScope.worktreeID(
+                worktreesExpanded: false,
+                activeWorktreeID: activeWorktreeID
+            ) == nil
+        )
+        #expect(
+            ExpandedProjectActivityScope.worktreeID(
+                worktreesExpanded: true,
+                activeWorktreeID: activeWorktreeID
+            ) == activeWorktreeID
+        )
+    }
 }
 
 @Suite("AppLayoutStore")

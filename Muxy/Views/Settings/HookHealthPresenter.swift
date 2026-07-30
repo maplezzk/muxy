@@ -21,6 +21,13 @@ enum HookHealthPresenter {
     }
 
     private static func installedDot(for health: HookHealth, now: Date) -> HookHealthDot {
+        if let discovery = health.discovery {
+            switch discovery.state {
+            case .ready: break
+            case .warning,
+                 .failed: return .warning
+            }
+        }
         guard let eventAt = health.lastEventAt else { return .healthy }
         guard now.timeIntervalSince(eventAt) < staleEventThreshold else { return .warning }
         return .healthy
@@ -56,6 +63,19 @@ enum HookHealthPresenter {
     private static func wasJustRepaired(_ repairedAt: Date, verifiedAt: Date?) -> Bool {
         guard let verifiedAt else { return true }
         return repairedAt >= verifiedAt.addingTimeInterval(-0.001)
+    }
+
+    @MainActor
+    static func discoveryLine(for health: HookHealth) -> String? {
+        guard let discovery = health.discovery else { return nil }
+        let version = discovery.version.map { L10n.string("Version \($0)") } ?? L10n.string("Version unknown")
+        switch discovery.state {
+        case .ready:
+            return L10n.string("\(version) · Plugin discovered")
+        case let .warning(message),
+             let .failed(message):
+            return "\(version) · \(message)"
+        }
     }
 
     @MainActor
